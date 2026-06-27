@@ -77,6 +77,10 @@ type XAutoClaimArgs struct {
 	Count    int64         // 返回的最大消息数
 }
 
+type XPendingExt struct {
+	redis.XPendingExt
+}
+
 // XAdd 向流中添加消息
 func XAdd(ctx context.Context, args *XAddArgs) (string, error) {
 	// 将值转换为map[string]interface{}格式
@@ -270,7 +274,7 @@ func XAck(ctx context.Context, stream, group string, ids ...string) (int64, erro
 }
 
 // XPending 查看待处理的消息
-func XPending(ctx context.Context, args *XPendingArgs) ([]redis.XPendingExt, error) {
+func XPending(ctx context.Context, args *XPendingArgs) ([]XPendingExt, error) {
 	cmd := client.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream:   associate(args.Stream),
 		Group:    args.Group,
@@ -284,7 +288,13 @@ func XPending(ctx context.Context, args *XPendingArgs) ([]redis.XPendingExt, err
 		return nil, cmd.Err()
 	}
 
-	return cmd.Val(), nil
+	exts := make([]XPendingExt, len(cmd.Val()))
+	for i, ext := range cmd.Val() {
+		exts[i] = XPendingExt{
+			XPendingExt: ext,
+		}
+	}
+	return exts, nil
 }
 
 // XClaim 认领消息

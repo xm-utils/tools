@@ -1,4 +1,4 @@
-module github.com/xm-utils/database
+module github.com/xm-utils/tools/database
 
 go 1.25.0
 
@@ -8,7 +8,7 @@ require (
 	github.com/longbridgeapp/sqlparser v0.3.2
 	golang.org/x/exp v0.0.0-20260611194520-c48552f49976
 	gorm.io/driver/mysql v1.6.0
-	gorm.io/gorm v1.30.0
+	gorm.io/gorm v1.31.2
 )
 
 require (

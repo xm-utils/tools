@@ -1,0 +1,171 @@
+# Nacos 配置示例文件
+# 将此文件保存为 nacos.yaml 或 nacos.yml 并在应用中加载
+
+# 是否启用 Nacos
+enabled: true
+
+# Nacos 服务器配置
+serverConfig:
+  - # 服务器协议 (http/https)，在 2.0 版本中不是必需的
+    scheme: "http"
+    # Nacos 服务器地址
+    ipAddr: "127.0.0.1"
+    # Nacos 服务器端口
+    port: 8848
+    # Nacos 服务器 gRPC 端口，默认为服务器端口 + 1000，不是必需的
+    grpcPort: 9848
+    # Nacos 服务器上下文路径，默认为 /nacos，在 2.0 版本中不是必需的
+    contextPath: "/nacos"
+
+# 客户端配置
+clientConfig:
+  # 请求 Nacos 服务器的超时时间（毫秒），默认值为 10000
+  timeoutMs: 10000
+  
+  # 向服务器发送心跳的时间间隔（毫秒），默认值为 5000
+  beatInterval: 5000
+  
+  # Nacos 的命名空间 ID。当命名空间为 public 时，此处填写空字符串
+  namespaceId: ""
+  
+  # Nacos 服务器上下文路径
+  contextPath: "/nacos"
+  
+  # 应用名称
+  appName: "my-application"
+  
+  # 客户端身份信息
+  appKey: ""
+  
+  # Nacos 认证用户名
+  username: ""
+  
+  # Nacos 认证密码
+  password: ""
+  
+  # 持久化 Nacos 服务信息的目录，默认值为当前路径
+  cacheDir: "/tmp/nacos/cache"
+  
+  # 开关，默认为 false，表示当获取远程配置失败时，使用本地缓存文件
+  disableUseSnapShot: false
+  
+  # 更新 Nacos 服务信息的 goroutine 数量，默认值为 20
+  updateThreadNum: 20
+  
+  # 启动时不加载 CacheDir 中持久化的 Nacos 服务信息
+  notLoadCacheAtStart: false
+  
+  # 当从服务器获取到空的服务实例时也更新缓存
+  updateCacheWhenEmpty: false
+  
+  # 日志目录，默认为当前路径
+  logDir: "/tmp/nacos/log"
+  
+  # 日志级别，必须是 debug、info、warn、error，默认值为 info
+  logLevel: "info"
+  
+  # 是否将日志追加到标准输出
+  appendToStdout: false
+  
+  # TLS 配置
+  TLSCfg:
+    # 是否指定，如果为 false，将从环境变量获取
+    appointed: false
+    # 启用 TLS
+    enable: false
+    # 信任所有服务器
+    trustAll: false
+    # 客户端验证服务器证书时使用
+    caFile: ""
+    # 服务器验证客户端证书时使用
+    certFile: ""
+    # 服务器验证客户端证书时使用
+    keyFile: ""
+    # 仅用于测试的服务器名称覆盖
+    serverNameOverride: ""
+  
+  # 开启通过查询异步更新服务
+  asyncUpdateService: false
+  
+  # 用于获取 Nacos 服务器地址的端点
+  endpoint: ""
+  
+  # 地址服务器端点上下文路径
+  endpointContextPath: ""
+  
+  # 地址服务器端点查询参数
+  endpointQueryParams: ""
+  
+  # 地址服务器集群名称
+  clusterName: ""
+  
+  # 应用连接标签
+  appConnLabels:
+    key1: "value1"
+    key2: "value2"
+
+
+# ==================== 多服务器配置示例 ====================
+# 如果需要配置多个 Nacos 服务器以实现高可用，可以这样配置：
+#
+# serverConfig:
+#   - scheme: "http"
+#     ipAddr: "192.168.1.100"
+#     port: 8848
+#     grpcPort: 9848
+#     contextPath: "/nacos"
+#   - scheme: "http"
+#     ipAddr: "192.168.1.101"
+#     port: 8848
+#     grpcPort: 9848
+#     contextPath: "/nacos"
+#   - scheme: "http"
+#     ipAddr: "192.168.1.102"
+#     port: 8848
+#     grpcPort: 9848
+#     contextPath: "/nacos"
+
+
+# ==================== 生产环境配置示例 ====================
+# production:
+#   enabled: true
+#   serverConfig:
+#     - scheme: "https"
+#       ipAddr: "nacos.example.com"
+#       port: 443
+#       grpcPort: 9848
+#       contextPath: "/nacos"
+#   clientConfig:
+#     timeoutMs: 10000
+#     beatInterval: 5000
+#     namespaceId: "your-production-namespace-id"
+#     appName: "production-app"
+#     username: "nacos"
+#     password: "your-secure-password"
+#     cacheDir: "/var/lib/nacos/cache"
+#     logDir: "/var/log/nacos"
+#     logLevel: "warn"
+#     TLSCfg:
+#       enable: true
+#       trustAll: false
+#       caFile: "/etc/ssl/certs/ca.crt"
+
+
+# ==================== 开发环境配置示例 ====================
+# development:
+#   enabled: true
+#   serverConfig:
+#     - scheme: "http"
+#       ipAddr: "127.0.0.1"
+#       port: 8848
+#   clientConfig:
+#     timeoutMs: 5000
+#     namespaceId: ""
+#     appName: "dev-app"
+#     logLevel: "debug"
+#     appendToStdout: true
+
+
+# ==================== 禁用 Nacos 示例 ====================
+# disabled:
+#   enabled: false

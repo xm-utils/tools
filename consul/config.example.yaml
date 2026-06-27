@@ -1,0 +1,18 @@
+# Consul 配置示例
+
+# Consul 客户端连接配置
+consul:
+  # Consul 服务器地址
+  address: "127.0.0.1:8500"
+  
+  # 协议类型 (http 或 https)
+  scheme: "http"
+  
+  # 数据中心名称（可选）
+  datacenter: "dc1"
+  
+  # ACL Token（可选，如果启用了 ACL）
+  token: ""
+  
+  # 超时时间
+  timeout: 10

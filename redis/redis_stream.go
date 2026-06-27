@@ -80,6 +80,9 @@ type XAutoClaimArgs struct {
 type XPendingExt struct {
 	redis.XPendingExt
 }
+type XStreamInfo struct {
+	*redis.XInfoStream
+}
 
 // XAdd 向流中添加消息
 func XAdd(ctx context.Context, args *XAddArgs) (string, error) {
@@ -375,13 +378,15 @@ func XInfoConsumers(ctx context.Context, stream, group string) ([]StreamConsumer
 }
 
 // XInfoStream 获取流信息
-func XInfoStream(ctx context.Context, stream string) (*redis.XInfoStreamCmd, error) {
+func XInfoStream(ctx context.Context, stream string) (*XStreamInfo, error) {
 	cmd := client.XInfoStream(ctx, associate(stream))
 	if cmd.Err() != nil {
 		return nil, cmd.Err()
 	}
 
-	return cmd, nil
+	return &XStreamInfo{
+		cmd.Val(),
+	}, nil
 }
 
 // convertToStreamMessages 将redis.XMessage切片转换为StreamMessage切片

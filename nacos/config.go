@@ -16,8 +16,6 @@ func (c Config) getConfig() ([]constant.ServerConfig, *constant.ClientConfig) {
 	if c.ClientConfig.GroupName == "" {
 		c.ClientConfig.GroupName = "DEFAULT_GROUP"
 	}
-	groupName = c.ClientConfig.GroupName
-	clusterName = c.ClientConfig.ClusterName
 
 	return c.getServerConfig(), c.getClientConfig()
 }

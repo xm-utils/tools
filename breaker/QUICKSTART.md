@@ -1,28 +1,26 @@
-# Circuit Breaker 快速开始指南
+# Circuit Breaker - 快速开始指南
 
-## 1. 安装与导入
+## 🚀 5分钟快速上手
 
-熔断器组件位于 `internal/common/circuitbreaker` 目录，无需额外安装，直接导入即可使用：
+### 第一步:导入熔断器组件
 
 ```go
-import "gitlab.novgate.com/xm/pay/internal/common/circuitbreaker"
+import "github.com/xm-utils/tools/breaker"
 ```
 
-## 2. 最简示例
-
-### 基础用法（3步完成）
+### 第二步:最简示例(3步完成)
 
 ```go
 package main
 
 import (
     "fmt"
-    "gitlab.novgate.com/xm/pay/internal/common/circuitbreaker"
+    "github.com/xm-utils/tools/breaker"
 )
 
 func main() {
     // 第1步: 创建熔断器
-    cb := circuitbreaker.NewCircuitBreaker("my-service", nil)
+    cb := breaker.NewCircuitBreaker("my-service", nil)
     
     // 第2步: 执行受保护的调用
     result, err := cb.Execute(func() (interface{}, error) {
@@ -39,13 +37,13 @@ func main() {
 }
 ```
 
-## 3. 常见场景
+## 💼 常见场景
 
-### 场景1: 保护gRPC调用
+### 场景1: 保护 gRPC 调用
 
 ```go
-// 在order服务中调用payment服务
-manager := circuitbreaker.GetManager()
+// 在 order 服务中调用 payment 服务
+manager := breaker.GetManager()
 cb := manager.GetOrCreateBreaker("payment-grpc", nil)
 
 result, err := cb.Execute(func() (interface{}, error) {
@@ -53,7 +51,7 @@ result, err := cb.Execute(func() (interface{}, error) {
     defer cancel()
     
     return paymentClient.CreatePayment(ctx, &PaymentRequest{
-        Amount: 100.00,
+        Amount:  100.00,
         OrderId: "ORDER_12345",
     })
 })
@@ -68,7 +66,7 @@ if err != nil {
 ### 场景2: 带降级策略
 
 ```go
-config := circuitbreaker.DefaultCircuitBreakerConfig()
+config := breaker.DefaultCircuitBreakerConfig()
 config.FallbackFunc = func(args ...interface{}) (interface{}, error) {
     // 降级: 返回缓存数据
     if cachedData, ok := cache.Get("product_list"); ok {
@@ -79,24 +77,39 @@ config.FallbackFunc = func(args ...interface{}) (interface{}, error) {
     return []Product{}, nil
 }
 
-cb := circuitbreaker.NewCircuitBreaker("product-service", config)
+cb := breaker.NewCircuitBreaker("product-service", config)
 products, _ := cb.Execute(func() (interface{}, error) {
     return productService.GetAllProducts()
 })
 ```
 
-### 场景3: 监控所有熔断器状态
+### 场景3: 状态变更回调
+
+```go
+config := breaker.DefaultCircuitBreakerConfig()
+config.OnStateChange = func(oldState, newState breaker.State) {
+    fmt.Printf("熔断器状态变更: %s -> %s\n", oldState, newState)
+    
+    if newState == breaker.StateOpen {
+        // 发送告警通知
+        sendAlert("熔断器打开，下游服务可能故障")
+    }
+}
+
+cb := breaker.NewCircuitBreaker("notification-service", config)
+```
+
+### 场景4: 监控所有熔断器状态
 
 ```go
 // 在管理后台或监控接口中使用
-manager := circuitbreaker.GetManager()
+manager := breaker.GetManager()
 
 // 获取所有熔断器指标
 allMetrics := manager.GetAllMetrics()
 
 for name, metrics := range allMetrics {
     fmt.Printf("[%s]\n", name)
-    fmt.Printf("  状态: %s\n", /* 需要额外记录状态 */)
     fmt.Printf("  总请求: %d\n", metrics.TotalRequests)
     fmt.Printf("  成功率: %.2f%%\n", metrics.SuccessRate*100)
     fmt.Printf("  拒绝率: %.2f%%\n", metrics.RejectionRate*100)
@@ -104,14 +117,14 @@ for name, metrics := range allMetrics {
 }
 ```
 
-## 4. 配置调优建议
+## ⚙️ 配置调优建议
 
 ### 核心业务（如支付、订单）
 
 ```go
-config := circuitbreaker.DefaultCircuitBreakerConfig()
-config.ErrorThreshold = 0.3           // 更敏感，30%错误率就熔断
-config.MinRequests = 20               // 样本量充足
+config := breaker.DefaultCircuitBreakerConfig()
+config.ErrorThreshold = 0.3                    // 更敏感，30%错误率就熔断
+config.MinRequests = 20                        // 样本量充足
 config.WaitDurationInOpenState = 60 * time.Second // 等待时间长一些
 config.SlowCallDuration = 2 * time.Second
 ```
@@ -119,54 +132,69 @@ config.SlowCallDuration = 2 * time.Second
 ### 非核心业务（如通知、日志）
 
 ```go
-config := circuitbreaker.DefaultCircuitBreakerConfig()
-config.ErrorThreshold = 0.7           // 容忍度高
+config := breaker.DefaultCircuitBreakerConfig()
+config.ErrorThreshold = 0.7                    // 容忍度高
 config.MinRequests = 10
 config.WaitDurationInOpenState = 10 * time.Second // 快速恢复
 ```
 
-### 高QPS场景（如商品查询）
+### 高 QPS 场景（如商品查询）
 
 ```go
-config := circuitbreaker.DefaultCircuitBreakerConfig()
-config.WindowType = circuitbreaker.WindowTypeCount
-config.WindowCount = 1000             // 基于计数窗口
-config.MinRequests = 100              // 最小样本量大
+config := breaker.DefaultCircuitBreakerConfig()
+config.WindowType = breaker.WindowTypeCount
+config.WindowCount = 1000     // 基于计数窗口
+config.MinRequests = 100      // 最小样本量大
 config.ErrorThreshold = 0.5
 ```
 
-### 低QPS场景（如报表生成）
+### 低 QPS 场景（如报表生成）
 
 ```go
-config := circuitbreaker.DefaultCircuitBreakerConfig()
-config.MinRequests = 5                // 最小样本量小
+config := breaker.DefaultCircuitBreakerConfig()
+config.MinRequests = 5        // 最小样本量小
 config.ErrorThreshold = 0.5
 ```
 
-## 5. 最佳实践清单
+### 慢调用保护场景
 
-✅ **必须做**
+```go
+config := breaker.DefaultCircuitBreakerConfig()
+config.SlowCallDuration = 2 * time.Second  // 超过2秒视为慢调用
+config.SlowCallThreshold = 0.5             // 慢调用比例50%触发熔断
+```
+
+## ✅ 最佳实践清单
+
+### 必须做
+
 - [ ] 为每个下游服务创建独立的熔断器
-- [ ] 设置合理的ErrorThreshold和MinRequests
-- [ ] 实现降级函数FallbackFunc
+- [ ] 设置合理的 ErrorThreshold 和 MinRequests
+- [ ] 实现降级函数 FallbackFunc
 - [ ] 启用告警监控
 
-✅ **推荐做**
+### 推荐做
+
 - [ ] 定期查看熔断器指标
-- [ ] 将配置存储在Nacos支持动态调整
+- [ ] 将配置存储在配置中心支持动态调整
+- [ ] 设置状态变更回调
+- [ ] 配置慢调用保护
 
-❌ **不要做**
-- [ ] 不要将MinRequests设置过小（容易误判）
+### 不要做
+
+- [ ] 不要将 MinRequests 设置过小（容易误判）
 - [ ] 不要忽略告警信息
+- [ ] 不要在降级函数中执行耗时操作
+- [ ] 不要忘记重置测试环境的熔断器
 
-## 6. 故障排查
+## 🔍 故障排查
 
 ### 问题1: 熔断器频繁打开
 
 **可能原因:**
 - 下游服务确实存在故障
-- ErrorThreshold设置过低
-- MinRequests设置过小导致误判
+- ErrorThreshold 设置过低
+- MinRequests 设置过小导致误判
 
 **解决方案:**
 ```go
@@ -179,7 +207,7 @@ config.MinRequests = 50      // 增大样本量
 ### 问题2: 请求被大量拒绝
 
 **可能原因:**
-- 熔断器处于Open状态
+- 熔断器处于 Open 状态
 - 下游服务长时间未恢复
 
 **解决方案:**
@@ -194,7 +222,30 @@ cb.Reset()
 // 3. 检查告警日志定位根本原因
 ```
 
-## 7. 完整实战示例
+### 问题3: 降级函数未生效
+
+**可能原因:**
+- FallbackFunc 未正确配置
+- 降级函数本身抛出异常
+
+**解决方案:**
+```go
+config.FallbackFunc = func(args ...interface{}) (interface{}, error) {
+    // 确保降级函数不会 panic
+    defer func() {
+        if r := recover(); r != nil {
+            log.Printf("降级函数异常: %v", r)
+        }
+    }()
+    
+    // 返回安全的默认值
+    return defaultValue, nil
+}
+```
+
+## 🎯 完整实战示例
+
+### 示例1: 订单服务中的熔断器应用
 
 ```go
 package main
@@ -206,15 +257,15 @@ import (
     "log"
     "time"
     
-    "gitlab.novgate.com/xm/pay/internal/common/circuitbreaker"
+    "github.com/xm-utils/tools/breaker"
 )
 
 func main() {
     // 1. 初始化熔断器管理器
-    manager := circuitbreaker.GetManager()
+    manager := breaker.GetManager()
     
     // 2. 配置支付服务熔断器
-    paymentConfig := circuitbreaker.DefaultCircuitBreakerConfig()
+    paymentConfig := breaker.DefaultCircuitBreakerConfig()
     paymentConfig.ErrorThreshold = 0.4
     paymentConfig.MinRequests = 20
     paymentConfig.FallbackFunc = func(args ...interface{}) (interface{}, error) {
@@ -226,7 +277,6 @@ func main() {
     
     // 3. 模拟业务调用
     for i := 0; i < 100; i++ {
-        // 调用支付服务
         go func(id int) {
             result, err := paymentCB.Execute(func() (interface{}, error) {
                 return processPayment(id)
@@ -267,23 +317,154 @@ func processPayment(id int) (interface{}, error) {
 }
 ```
 
-## 8. 下一步
+### 示例2: HTTP 客户端保护
 
-- 📖 阅读 [README.md](README.md) 了解详细API文档
-- 🔍 查看 [example.go](example.go) 查看更多使用示例
-- 🧪 运行测试: `go test -v ./internal/common/circuitbreaker/...`
-- 📊 集成监控系统（Prometheus、Grafana等）
+```go
+package httpclient
 
-## 9. 常见问题
+import (
+    "io"
+    "net/http"
+    "time"
+    
+    "github.com/xm-utils/tools/breaker"
+)
+
+type ProtectedHTTPClient struct {
+    cb         *breaker.CircuitBreaker
+    httpClient *http.Client
+}
+
+func NewProtectedHTTPClient(serviceName string) *ProtectedHTTPClient {
+    config := breaker.DefaultCircuitBreakerConfig()
+    config.ErrorThreshold = 0.5
+    config.MinRequests = 10
+    config.SlowCallDuration = 5 * time.Second
+    
+    return &ProtectedHTTPClient{
+        cb: breaker.NewCircuitBreaker(serviceName, config),
+        httpClient: &http.Client{
+            Timeout: 10 * time.Second,
+        },
+    }
+}
+
+func (c *ProtectedHTTPClient) Get(url string) ([]byte, error) {
+    result, err := c.cb.Execute(func() (interface{}, error) {
+        resp, err := c.httpClient.Get(url)
+        if err != nil {
+            return nil, err
+        }
+        defer resp.Body.Close()
+        
+        return io.ReadAll(resp.Body)
+    })
+    
+    if err != nil {
+        return nil, err
+    }
+    
+    return result.([]byte), nil
+}
+
+// 使用示例
+func Example() {
+    client := NewProtectedHTTPClient("api-service")
+    
+    data, err := client.Get("https://api.example.com/data")
+    if err != nil {
+        log.Printf("请求失败: %v", err)
+        return
+    }
+    
+    log.Printf("获取数据: %s", string(data))
+}
+```
+
+### 示例3: 数据库访问保护
+
+```go
+package database
+
+import (
+    "database/sql"
+    "time"
+    
+    "github.com/xm-utils/tools/breaker"
+)
+
+type ProtectedDB struct {
+    db *sql.DB
+    cb *breaker.CircuitBreaker
+}
+
+func NewProtectedDB(db *sql.DB, name string) *ProtectedDB {
+    config := breaker.DefaultCircuitBreakerConfig()
+    config.ErrorThreshold = 0.3
+    config.MinRequests = 5
+    config.SlowCallDuration = 3 * time.Second
+    
+    return &ProtectedDB{
+        db: db,
+        cb: breaker.NewCircuitBreaker(name, config),
+    }
+}
+
+func (p *ProtectedDB) Query(query string, args ...interface{}) (*sql.Rows, error) {
+    result, err := p.cb.Execute(func() (interface{}, error) {
+        return p.db.Query(query, args...)
+    })
+    
+    if err != nil {
+        return nil, err
+    }
+    
+    return result.(*sql.Rows), nil
+}
+
+// 使用示例
+func Example() {
+    db, _ := sql.Open("mysql", "user:password@tcp(localhost)/dbname")
+    protectedDB := NewProtectedDB(db, "mysql-primary")
+    
+    rows, err := protectedDB.Query("SELECT * FROM users WHERE id = ?", 123)
+    if err != nil {
+        log.Printf("查询失败: %v", err)
+        return
+    }
+    defer rows.Close()
+    
+    // 处理结果...
+}
+```
+
+## ❓ 常见问题
 
 **Q: 熔断器会影响性能吗？**  
 A: 影响极小。熔断器只做简单的状态检查和统计，开销在微秒级别。
 
 **Q: 如何动态调整配置？**  
-A: 建议使用Nacos配置中心，监听配置变化后重建熔断器。
+A: 建议使用配置中心（如 Nacos），监听配置变化后重建熔断器。
 
 **Q: 熔断器是线程安全的吗？**  
-A: 是的，内部已实现读写锁，可在多个goroutine中安全使用。
+A: 是的，内部已实现读写锁，可在多个 goroutine 中安全使用。
 
 **Q: 如何在微服务间共享熔断器状态？**  
-A: 当前版本是每个服务实例独立维护状态。如需分布式熔断，可结合Redis实现。
+A: 当前版本是每个服务实例独立维护状态。如需分布式熔断，可结合 Redis 实现。
+
+**Q: 熔断器打开后多久会自动恢复？**  
+A: 由 `WaitDurationInOpenState` 配置决定，默认 30 秒。之后会进入 Half-Open 状态进行探测。
+
+**Q: 降级函数返回的错误会被记录吗？**  
+A: 降级函数返回的结果不会被记录为失败，因为这是预期的降级行为。
+
+## 📚 下一步
+
+- 📖 阅读 [README.md](README.md) 了解详细 API 文档
+- 🔍 查看 [example.go](example.go) 查看更多使用示例
+- 🧪 运行测试: `go test -v ./breaker/...`
+- 📊 集成监控系统（Prometheus、Grafana 等）
+
+## 🆘 技术支持
+
+如有问题，请联系开发团队或提交 Issue。

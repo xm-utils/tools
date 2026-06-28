@@ -1,17 +1,20 @@
-# 非阻塞重试策略执行器
+# Retry - 非阻塞重试执行器
 
-基于Go协程的非阻塞重试执行器,支持多种重试策略、批量并发处理、完善的监控和回调机制。
+## 📋 概述
 
-## ✨ 核心特性
+基于 Go 协程的非阻塞重试执行器，支持多种重试策略、批量并发处理、完善的监控和回调机制。通过异步执行和智能重试策略，提高系统的容错能力和稳定性。
 
-✅ **非阻塞执行** - 基于goroutine异步执行,不阻塞主线程  
-✅ **多种重试策略** - 固定间隔、指数退避、线性退避  
-✅ **批量并发处理** - 支持协程池控制并发,分批处理大量任务  
-✅ **灵活配置** - 超时控制、错误过滤、上下文取消  
-✅ **完善回调** - 支持重试完成回调、进度回调  
-✅ **详细监控** - 记录每次重试的耗时、延迟、错误信息  
+### ✨ 核心特性
 
-## 📦 架构设计
+- ✅ **非阻塞执行** - 基于 goroutine 异步执行，不阻塞主线程
+- ✅ **多种重试策略** - 固定间隔、指数退避、线性退避
+- ✅ **批量并发处理** - 支持协程池控制并发，分批处理大量任务
+- ✅ **灵活配置** - 超时控制、错误过滤、上下文取消
+- ✅ **完善回调** - 支持重试完成回调、进度回调
+- ✅ **详细监控** - 记录每次重试的耗时、延迟、错误信息
+- ✅ **同步/异步双模式** - 支持 Execute (异步) 和 ExecuteSync (同步)
+
+## 🏗️ 架构设计
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -52,7 +55,7 @@ package main
 
 import (
     "context"
-    "gitlab.novgate.com/xm/pay/internal/common/retry"
+    "github.com/xm-utils/tools/retry"
 )
 
 func main() {
@@ -101,7 +104,7 @@ executor.Execute(task)
 ### 设置回调
 
 ```go
-executor.SetCallback(func(result *retry.RetryResult) {
+executor.SetCallback(func(result *retry.Result) {
     if result.Success {
         log.Printf("任务成功: 尝试%d次, 耗时%v", 
             result.Attempts, result.TotalDuration)
@@ -125,7 +128,7 @@ executor.Execute(task)
 
 ## 💡 使用场景
 
-### 场景1: API调用重试
+### 场景1: API 调用重试
 
 ```go
 task := func(ctx context.Context) (interface{}, error) {
@@ -133,7 +136,11 @@ task := func(ctx context.Context) (interface{}, error) {
     if err != nil {
         return nil, err
     }
-    return resp.Body, nil
+    defer resp.Body.Close()
+    
+    var data interface{}
+    json.NewDecoder(resp.Body).Decode(&data)
+    return data, nil
 }
 
 config := retry.DefaultRetryConfig()
@@ -155,12 +162,14 @@ go func() {
 
 ```go
 task := func(ctx context.Context) (interface{}, error) {
-    return nil, db.ExecContext(ctx, "UPDATE orders SET status=? WHERE id=?", 
+    _, err := db.ExecContext(ctx, 
+        "UPDATE orders SET status=? WHERE id=?", 
         status, orderID)
+    return nil, err
 }
 
 // 只重试特定错误
-var ErrDeadlock = errors.New("deadlock")
+var ErrDeadlock = errors.New("deadlock detected")
 config := retry.DefaultRetryConfig()
 config.RetryableErrors = []error{ErrDeadlock}
 
@@ -184,7 +193,7 @@ func HandleCallback(callback *OrderCallback) {
     executor := retry.NewRetryExecutor(config)
     
     // 重试失败后推入死信队列
-    executor.SetCallback(func(result *retry.RetryResult) {
+    executor.SetCallback(func(result *retry.Result) {
         if !result.Success {
             dlqManager.PushToDeadLetter(
                 callback.OrderNo,
@@ -239,13 +248,13 @@ go func() {
 
 ## 🔧 配置说明
 
-### RetryConfig (单个任务重试配置)
+### Config (单个任务重试配置)
 
 | 字段 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| MaxRetries | int | 3 | 最大重试次数 |
-| Strategy | RetryStrategy | ExponentialBackoff | 重试策略 |
-| Timeout | time.Duration | 30s | 单次执行超时 |
+| MaxRetries | int | 5 | 最大重试次数 |
+| Strategy | Strategy | ExponentialBackoff | 重试策略 |
+| Timeout | time.Duration | 10s | 单次执行超时 |
 | RetryableErrors | []error | nil(全部重试) | 可重试的错误列表 |
 | Context | context.Context | background | 上下文(用于取消) |
 
@@ -255,26 +264,26 @@ go func() {
 |------|------|--------|------|
 | PoolSize | int | 10 | 协程池大小(并发数) |
 | MaxRetries | int | 3 | 最大重试次数 |
-| Strategy | RetryStrategy | ExponentialBackoff | 重试策略 |
+| Strategy | Strategy | ExponentialBackoff | 重试策略 |
 | Timeout | time.Duration | 30s | 单次超时 |
 | BatchSize | int | 100 | 批处理大小 |
 | ProgressCallback | func(int,int) | nil | 进度回调 |
 
 ## 📈 监控指标
 
-### RetryResult (重试结果)
+### Result (重试结果)
 
 ```go
-type RetryResult struct {
+type Result struct {
     Success       bool           // 是否成功
     Data          interface{}    // 返回数据
     Error         error          // 错误信息
     Attempts      int            // 总尝试次数
     TotalDuration time.Duration  // 总耗时
-    Retries       []RetryAttempt // 每次重试详情
+    Retries       []Attempt      // 每次重试详情
 }
 
-type RetryAttempt struct {
+type Attempt struct {
     Attempt  int           // 尝试次数
     Duration time.Duration // 本次耗时
     Error    error         // 错误信息
@@ -285,7 +294,7 @@ type RetryAttempt struct {
 ### 使用示例
 
 ```go
-executor.SetCallback(func(result *retry.RetryResult) {
+executor.SetCallback(func(result *retry.Result) {
     // 记录指标
     metrics.RecordRetryDuration(result.TotalDuration)
     metrics.RecordRetryAttempts(result.Attempts)
@@ -299,13 +308,25 @@ executor.SetCallback(func(result *retry.RetryResult) {
 })
 ```
 
+### BatchResult (批量重试结果)
+
+```go
+type BatchResult struct {
+    TotalTasks   int                      // 总任务数
+    SuccessCount int                      // 成功数
+    FailedCount  int                      // 失败数
+    Results      map[string]*Result       // 每个任务的结果
+    Duration     time.Duration            // 总耗时
+}
+```
+
 ## 🎯 最佳实践
 
 ### 1. 选择合适的重试策略
 
-- **网络请求/API调用**: 使用指数退避(ExponentialBackoff)
+- **网络请求/API调用**: 使用指数退避(ExponentialBackoff)，避免雪崩效应
 - **数据库操作**: 使用固定间隔(Fixed)或线性退避(Linear)
-- **临时性故障**: 使用指数退避,避免雪崩
+- **临时性故障**: 使用指数退避，给予系统恢复时间
 
 ### 2. 设置合理的超时时间
 
@@ -345,7 +366,7 @@ config.BatchSize = 100    // 避免一次性创建过多goroutine
 ### 6. 监控和告警
 
 ```go
-executor.SetCallback(func(result *retry.RetryResult) {
+executor.SetCallback(func(result *retry.Result) {
     if !result.Success {
         // 发送告警
         alertService.SendAlert("重试失败", result.Error)
@@ -356,29 +377,119 @@ executor.SetCallback(func(result *retry.RetryResult) {
 })
 ```
 
-## 🔍 性能考虑
+### 7. 确保任务幂等性
 
-- **单个任务**: 几乎无额外开销,仅增加一个goroutine
-- **批量任务**: 通过协程池控制并发,避免资源耗尽
-- **内存占用**: 每个任务约1-5KB(取决于返回值大小)
-- **建议并发数**: CPU核数 × 2 ~ 4
+```go
+// 确保任务可以安全地重复执行
+task := func(ctx context.Context) (interface{}, error) {
+    // 使用唯一ID防止重复处理
+    return processWithIdempotency(uniqueID)
+}
+```
 
 ## ⚠️ 注意事项
 
-1. **幂等性**: 确保任务是幂等的,避免重复执行导致数据不一致
+1. **幂等性**: 确保任务是幂等的，避免重复执行导致数据不一致
 2. **资源泄漏**: 注意关闭连接、释放资源
-3. **超时设置**: 合理设置超时,避免长时间阻塞
+3. **超时设置**: 合理设置超时，避免长时间阻塞
 4. **错误分类**: 区分可重试和不可重试错误
-5. **监控告警**: 及时发现问题,避免静默失败
+5. **监控告警**: 及时发现问题，避免静默失败
+6. **重试次数**: 不要设置过大的重试次数，建议 3-5 次
+7. **延迟时间**: 根据业务容忍度设置合理的延迟时间
 
-## 🧪 测试
+## 🔍 性能考虑
 
-```bash
-# 运行测试
-go test ./internal/common/retry/...
+- **单个任务**: 几乎无额外开销，仅增加一个 goroutine
+- **批量任务**: 通过协程池控制并发，避免资源耗尽
+- **内存占用**: 每个任务约 1-5KB(取决于返回值大小)
+- **建议并发数**: CPU 核数 × 2 ~ 4
+- **批次大小**: 建议 50-200，根据实际情况调整
 
-# 运行示例
-go run internal/common/retry/example.go
+## 🧪 测试示例
+
+```go
+package retry_test
+
+import (
+    "context"
+    "errors"
+    "testing"
+    "time"
+    "github.com/xm-utils/tools/retry"
+)
+
+func TestRetrySuccess(t *testing.T) {
+    attempt := 0
+    task := func(ctx context.Context) (interface{}, error) {
+        attempt++
+        if attempt < 3 {
+            return nil, errors.New("temporary error")
+        }
+        return "success", nil
+    }
+    
+    config := retry.DefaultRetryConfig()
+    config.MaxRetries = 3
+    config.Strategy = &retry.FixedRetryStrategy{
+        Interval: 100 * time.Millisecond,
+    }
+    
+    executor := retry.NewRetryExecutor(config)
+    result := executor.ExecuteSync(task)
+    
+    if !result.Success {
+        t.Errorf("期望成功,实际失败: %v", result.Error)
+    }
+    
+    if result.Attempts != 3 {
+        t.Errorf("期望尝试3次,实际%d次", result.Attempts)
+    }
+}
+
+func TestRetryFailure(t *testing.T) {
+    task := func(ctx context.Context) (interface{}, error) {
+        return nil, errors.New("permanent error")
+    }
+    
+    config := retry.DefaultRetryConfig()
+    config.MaxRetries = 2
+    config.Strategy = &retry.FixedRetryStrategy{
+        Interval: 10 * time.Millisecond,
+    }
+    
+    executor := retry.NewRetryExecutor(config)
+    result := executor.ExecuteSync(task)
+    
+    if result.Success {
+        t.Error("期望失败,实际成功")
+    }
+}
+
+func TestBatchRetry(t *testing.T) {
+    tasks := []retry.BatchTask{
+        {ID: "task1", Task: func(ctx context.Context) (interface{}, error) {
+            return "ok", nil
+        }},
+        {ID: "task2", Task: func(ctx context.Context) (interface{}, error) {
+            return nil, errors.New("failed")
+        }},
+    }
+    
+    config := retry.DefaultBatchRetryConfig()
+    config.PoolSize = 2
+    config.MaxRetries = 1
+    
+    executor := retry.NewBatchRetryExecutor(config)
+    result := executor.ExecuteBatchSync(tasks)
+    
+    if result.SuccessCount != 1 {
+        t.Errorf("期望成功1个,实际%d个", result.SuccessCount)
+    }
+    
+    if result.FailedCount != 1 {
+        t.Errorf("期望失败1个,实际%d个", result.FailedCount)
+    }
+}
 ```
 
 ## 📝 完整示例
@@ -393,14 +504,16 @@ go run internal/common/retry/example.go
 - ✅ 批量重试
 - ✅ 与死信队列集成
 - ✅ 监控回调
+- ✅ 同步执行
 
 ## 🚀 下一步
 
-- 📖 阅读 [example.go](example.go) 了解详细用法
-- 💡 在实际项目中集成使用
-- 📊 添加监控和告警
+- 📖 阅读 [QUICKSTART.md](QUICKSTART.md) 快速上手
+- 💡 查看 [example.go](example.go) 了解详细用法
+- 🧪 运行测试: `go test ./retry/...`
+- 📊 在实际项目中集成使用
 - 🔧 根据业务需求调整配置
 
----
+## 🆘 技术支持
 
-**祝你使用愉快!** 🎉
+如有问题，请联系开发团队或提交 Issue。

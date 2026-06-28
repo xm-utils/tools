@@ -17,6 +17,11 @@
 - [核心功能](#核心功能)
   - [消息生产](#消息生产)
   - [消息消费](#消息消费)
+  - [消息确认机制](#消息确认机制)
+    - [手动提交模式](#1-手动提交模式推荐)
+    - [自动提交模式](#2-自动提交模式)
+    - [消息重试机制](#3-消息重试机制)
+    - [自定义确认逻辑](#4-自定义确认逻辑)
   - [单主题模式](#单主题模式)
   - [多主题模式](#多主题模式)
 - [高级功能](#高级功能)
@@ -43,6 +48,7 @@
   - [消息可靠性保证](#消息可靠性保证)
   - [性能优化建议](#性能优化建议)
   - [去重策略选择](#去重策略选择)
+  - [消息确认最佳实践](#消息确认最佳实践)
 - [常见问题](#常见问题)
 - [依赖](#依赖)
 - [许可证](#许可证)
@@ -53,6 +59,7 @@
 
 - **消息生产**：支持单条消息发布、批量消息发布、自动重试
 - **消息消费**：支持单主题/多主题订阅、异步消息处理、优雅退出
+- **消息确认**：支持手动/自动提交 offset、内置重试机制、指数退避策略
 - **消息去重**：支持基于内存或 Redis 的消息去重，防止重复处理
 - **灵活配置**：支持丰富的配置选项，满足不同场景需求
 
@@ -60,6 +67,8 @@
 
 - ✅ **简洁的 API**：封装复杂的 kafka-go SDK，提供简单易用的接口
 - ✅ **单/多主题支持**：灵活支持单主题和多主题消费模式
+- ✅ **消息确认**：支持手动/自动提交 offset，保证消息可靠性 ⭐ NEW
+- ✅ **消息重试**：内置指数退避重试机制，自动处理临时故障 ⭐ NEW
 - ✅ **消息去重**：内置消息去重机制，支持内存和 Redis 两种存储方式
 - ✅ **批量处理**：支持批量消息发送，提高吞吐量
 - ✅ **自动重试**：内置重试机制，提高消息投递成功率
@@ -364,6 +373,368 @@ handler := func(ctx context.Context, topic string, msg kafka.Message) error {
     // 处理业务逻辑
     processOrder(msg.Value)
     
+    return nil
+}
+```
+
+### 消息确认机制 ⭐ NEW
+
+Kafka 消费者支持完整的消息确认（Message Acknowledgment）功能，包括手动/自动提交 offset、内置重试机制和指数退避策略。
+
+#### MessageContext 消息上下文
+
+新增 `MessageContext` 结构，封装消息和确认信息：
+
+```go
+type MessageContext struct {
+    Message   kafka.Message
+    Commit    func() error   // 提交offset（确认消息）
+    Retry     int            // 当前重试次数
+    MaxRetry  int            // 最大重试次数
+    ShouldAck bool           // 是否应该确认
+}
+```
+
+#### 1. 手动提交模式（推荐）
+
+手动提交模式下，只有当消息处理成功后才会提交 offset，确保消息不丢失：
+
+**配置示例：**
+```go
+config := &kafka.Config{
+    Brokers:    []string{"localhost:9092"},
+    Topic:      "orders",
+    GroupID:    "order-processor",
+    AutoCommit: false,  // 手动提交（推荐）
+    MaxRetries: 3,      // 最大重试3次
+}
+
+kafka.InitConsumer(config)
+consumer := kafka.GetConsumer()
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    var order Order
+    if err := json.Unmarshal(msg.Value, &order); err != nil {
+        return err // 返回错误会触发重试
+    }
+    
+    // 处理订单
+    if err := processOrder(order); err != nil {
+        return err // 返回错误会触发重试
+    }
+    
+    // handler 返回 nil 后，消费者会自动提交 offset
+    return nil
+}
+
+consumer.Subscribe(ctx, handler)
+```
+
+**工作流程：**
+```
+1. 读取消息
+   ↓
+2. 创建 MessageContext
+   ↓
+3. 异步处理消息 (goroutine)
+   ↓
+4. 执行 handler
+   ├─ 成功 → 提交 offset → 完成
+   └─ 失败 → 重试
+       ├─ 未达最大重试 → 等待(指数退避) → 重试
+       └─ 达到最大重试 → 记录错误 → 提交 offset (跳过)
+```
+
+**优点：**
+- ✅ 保证消息至少被处理一次（At-Least-Once）
+- ✅ 失败的消息可以自动重试
+- ✅ 避免消息丢失
+- ✅ 内置指数退避策略，防止雪崩效应
+
+**适用场景：**
+- 订单处理
+- 支付通知
+- 金融交易
+- 任何不能丢失消息的关键业务
+
+#### 2. 自动提交模式
+
+自动提交模式下，offset 会定期自动提交，不管消息是否处理成功：
+
+**配置示例：**
+```go
+config := &kafka.Config{
+    Brokers:        []string{"localhost:9092"},
+    Topic:          "logs",
+    GroupID:        "log-consumer",
+    AutoCommit:     true,           // 自动提交
+    CommitInterval: 5 * time.Second, // 每5秒提交一次
+}
+
+kafka.InitConsumer(config)
+consumer := kafka.GetConsumer()
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 处理日志
+    log.Printf("Log: %s", string(msg.Value))
+    return nil
+}
+
+consumer.Subscribe(ctx, handler)
+```
+
+**工作流程：**
+```
+1. 读取消息
+   ↓
+2. 异步处理消息 (goroutine)
+   ↓
+3. 执行 handler
+   ↓
+4. 定期自动提交 offset (独立协程)
+```
+
+**优点：**
+- ✅ 性能更好，无需等待提交
+- ✅ 实现简单
+
+**缺点：**
+- ❌ 可能导致消息丢失（提交后处理失败）
+- ❌ 可能重复处理（处理成功但未提交）
+
+**适用场景：**
+- 日志收集
+- 监控数据
+- 用户行为分析
+- 允许少量丢失的非关键业务
+
+#### 3. 消息重试机制
+
+消费者内置了指数退避重试机制，自动处理临时故障：
+
+**配置示例：**
+```go
+config := &kafka.Config{
+    Brokers:      []string{"localhost:9092"},
+    Topic:        "events",
+    GroupID:      "event-processor",
+    AutoCommit:   false,
+    MaxRetries:   5,              // 最多重试5次
+    RetryBackoff: 2 * time.Second, // 初始退避时间
+}
+
+kafka.InitConsumer(config)
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 如果返回错误，会自动重试
+    // 重试间隔：2s, 4s, 8s, 16s, 32s...
+    return processEvent(msg.Value)
+}
+```
+
+**重试策略（指数退避）：**
+- 第1次重试：等待 2 秒
+- 第2次重试：等待 4 秒
+- 第3次重试：等待 8 秒
+- 第4次重试：等待 16 秒
+- 第5次重试：等待 32 秒
+- 达到最大重试次数后：记录错误并跳过该消息
+
+**默认退避策略：**
+如果未配置 `RetryBackoff`，使用默认策略：1s, 2s, 4s, 8s, 16s, 32s, 60s, 60s...
+
+**最大退避时间：** 不超过 5 分钟
+
+#### 4. 自定义确认逻辑
+
+对于需要精细控制的场景，可以禁用自动重试，自行控制：
+
+```go
+config := &kafka.Config{
+    Brokers:    []string{"localhost:9092"},
+    Topic:      "critical-events",
+    GroupID:    "critical-processor",
+    AutoCommit: false,
+    MaxRetries: 0, // 禁用自动重试，自行控制
+}
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 自定义重试逻辑
+    maxAttempts := 5
+    for i := 0; i < maxAttempts; i++ {
+        if err := processCriticalEvent(msg.Value); err != nil {
+            log.Printf("Attempt %d failed: %v", i+1, err)
+            if i == maxAttempts-1 {
+                // 达到最大重试，发送到死信队列
+                sendToDeadLetterQueue(msg, err)
+                return nil // 返回 nil 以提交 offset，避免阻塞
+            }
+            time.Sleep(time.Duration(i+1) * time.Second)
+            continue
+        }
+        break
+    }
+    return nil
+}
+```
+
+#### 起始 Offset 配置
+
+支持从不同位置开始消费：
+
+```go
+config := &kafka.Config{
+    // 从最早的消息开始消费（默认）
+    StartOffset: kafka.FirstOffset, // -2
+    
+    // 或从最新的消息开始消费（忽略历史消息）
+    // StartOffset: kafka.LastOffset, // -1
+}
+```
+
+**建议：**
+- 新消费者组使用 `FirstOffset`，确保不遗漏消息
+- 已有消费者组可以使用 `LastOffset`，快速追上进度
+
+#### 消息确认机制 ⭐ NEW
+
+Kafka 消费者支持两种消息确认模式：**手动提交**（推荐）和**自动提交**。
+
+##### 1. 手动提交模式（推荐）
+
+手动提交模式下，只有当消息处理成功后才会提交 offset，确保消息不丢失：
+
+```go
+config := &kafka.Config{
+    Brokers:    []string{"localhost:9092"},
+    Topic:      "orders",
+    GroupID:    "order-processor",
+    AutoCommit: false,  // 手动提交（推荐）
+    MaxRetries: 3,      // 最大重试3次
+}
+
+kafka.InitConsumer(config)
+consumer := kafka.GetConsumer()
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    var order Order
+    if err := json.Unmarshal(msg.Value, &order); err != nil {
+        return err // 返回错误会触发重试
+    }
+    
+    // 处理订单
+    if err := processOrder(order); err != nil {
+        return err // 返回错误会触发重试
+    }
+    
+    // handler 返回 nil 后，消费者会自动提交 offset
+    return nil
+}
+
+consumer.Subscribe(ctx, handler)
+```
+
+**手动提交的优点：**
+- ✅ 保证消息至少被处理一次（At-Least-Once）
+- ✅ 失败的消息可以重试
+- ✅ 避免消息丢失
+
+##### 2. 自动提交模式
+
+自动提交模式下，offset 会定期自动提交，不管消息是否处理成功：
+
+```go
+config := &kafka.Config{
+    Brokers:        []string{"localhost:9092"},
+    Topic:          "logs",
+    GroupID:        "log-consumer",
+    AutoCommit:     true,           // 自动提交
+    CommitInterval: 5 * time.Second, // 每5秒提交一次
+}
+
+kafka.InitConsumer(config)
+consumer := kafka.GetConsumer()
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 处理日志
+    log.Printf("Log: %s", string(msg.Value))
+    return nil
+}
+
+consumer.Subscribe(ctx, handler)
+```
+
+**自动提交的优点：**
+- ✅ 性能更好，无需等待提交
+- ✅ 实现简单
+
+**缺点：**
+- ❌ 可能导致消息丢失（提交后处理失败）
+- ❌ 可能重复处理（处理成功但未提交）
+
+##### 3. 消息重试机制
+
+消费者内置了指数退避重试机制：
+
+```go
+config := &kafka.Config{
+    Brokers:      []string{"localhost:9092"},
+    Topic:        "events",
+    GroupID:      "event-processor",
+    AutoCommit:   false,
+    MaxRetries:   5,              // 最多重试5次
+    RetryBackoff: 2 * time.Second, // 初始退避时间
+}
+
+kafka.InitConsumer(config)
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 如果返回错误，会自动重试
+    // 重试间隔：2s, 4s, 8s, 16s, 32s...
+    return processEvent(msg.Value)
+}
+```
+
+**重试策略：**
+- 第1次重试：等待 2 秒
+- 第2次重试：等待 4 秒
+- 第3次重试：等待 8 秒
+- 第4次重试：等待 16 秒
+- 第5次重试：等待 32 秒
+- 达到最大重试次数后，记录错误并跳过该消息
+
+##### 4. 自定义确认逻辑
+
+对于需要精细控制的场景，可以使用 `MessageContext`：
+
+```go
+// 注意：当前版本中，handler 返回 nil 即表示确认
+// 如需完全手动控制，可以在配置中添加选项
+
+config := &kafka.Config{
+    Brokers:    []string{"localhost:9092"},
+    Topic:      "critical-events",
+    GroupID:    "critical-processor",
+    AutoCommit: false,
+    MaxRetries: 0, // 禁用自动重试，自行控制
+}
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 自定义重试逻辑
+    maxAttempts := 5
+    for i := 0; i < maxAttempts; i++ {
+        if err := processCriticalEvent(msg.Value); err != nil {
+            log.Printf("Attempt %d failed: %v", i+1, err)
+            if i == maxAttempts-1 {
+                // 达到最大重试，发送到死信队列
+                sendToDeadLetterQueue(msg)
+                return nil // 返回 nil 以提交 offset
+            }
+            time.Sleep(time.Duration(i+1) * time.Second)
+            continue
+        }
+        break
+    }
     return nil
 }
 ```
@@ -686,15 +1057,46 @@ type Config struct {
 | MinBytes | int | 1 | 每次读取的最小字节数 |
 | MaxBytes | int | 1MB (1048576) | 每次读取的最大字节数 |
 | QueueCapacity | int | 1000 | 队列容量（预留配置） |
+| AutoCommit | bool | false | 是否自动提交 offset（推荐手动提交） |
+| CommitInterval | time.Duration | 0 | 自动提交间隔（AutoCommit=true 时有效） |
+| StartOffset | int64 | FirstOffset (-2) | 起始 offset：-2=FirstOffset, -1=LastOffset |
+| MaxRetries | int | 3 | 消息处理最大重试次数 |
+| RetryBackoff | time.Duration | 1s | 重试退避时间（指数退避） |
 
 **消费者内部配置（不可配置）：**
 - `MaxWait`: 1s - 最大等待时间
 - `HeartbeatInterval`: 3s - 心跳间隔
 - `SessionTimeout`: 30s - 会话超时
 - `RebalanceTimeout`: 30s - 重平衡超时
-- `StartOffset`: FirstOffset - 从最早的消息开始消费
 - `ReadBackoffMin`: 100ms - 最小退避时间
 - `ReadBackoffMax`: 1s - 最大退避时间
+
+**消息确认配置详解：**
+
+1. **AutoCommit（自动提交）**
+   - `false`（默认）：手动提交模式，消息处理成功后才提交 offset
+   - `true`：自动提交模式，定期提交 offset，不管消息是否处理成功
+   - **推荐**：生产环境使用 `false`，保证消息不丢失
+
+2. **CommitInterval（提交间隔）**
+   - 仅在 `AutoCommit=true` 时生效
+   - 建议设置 5-10 秒
+   - 过短会增加 Kafka 负担，过长可能导致重复处理
+
+3. **StartOffset（起始 offset）**
+   - `kafka.FirstOffset` (-2)：从最早的消息开始消费
+   - `kafka.LastOffset` (-1)：从最新的消息开始消费（忽略历史消息）
+   - **建议**：新消费者组使用 `FirstOffset`，确保不遗漏消息
+
+4. **MaxRetries（最大重试）**
+   - 消息处理失败后的重试次数
+   - 建议设置 3-5 次
+   - 达到最大重试后，记录错误并跳过该消息
+
+5. **RetryBackoff（重试退避）**
+   - 初始退避时间，每次重试翻倍
+   - 例如：设置为 2s，重试间隔为 2s, 4s, 8s, 16s, 32s...
+   - 最大不超过 5 分钟
 
 ## 💡 使用示例
 
@@ -1518,6 +1920,137 @@ deduplicator := kafka.NewMessageDeduplicator(store, 7*24*time.Hour)
 - 考虑 Kafka 消息保留时间
 - 平衡去重效果和存储成本
 
+### 消息确认最佳实践 ⭐ NEW
+
+#### 1. 选择合适的确认模式
+
+| 场景 | 推荐模式 | 原因 |
+|------|---------|------|
+| 订单处理 | 手动提交 | 不能丢失订单 |
+| 支付通知 | 手动提交 | 必须保证到账 |
+| 金融交易 | 手动提交 | 数据一致性要求高 |
+| 日志收集 | 自动提交 | 允许少量丢失 |
+| 监控数据 | 自动提交 | 实时性优先 |
+| 用户行为 | 自动提交 | 允许重复 |
+
+#### 2. 合理设置重试次数
+
+- **临时故障**（网络抖动、数据库连接池满）：3-5 次
+- **业务校验失败**（参数错误、权限不足）：0 次（不重试）
+- **外部依赖故障**（第三方 API 超时）：5-10 次
+
+```go
+// 关键业务配置
+config := &kafka.Config{
+    AutoCommit:   false,
+    MaxRetries:   5,
+    RetryBackoff: 2 * time.Second,
+}
+
+// 非关键业务配置
+config := &kafka.Config{
+    AutoCommit:   true,
+    CommitInterval: 5 * time.Second,
+}
+```
+
+#### 3. 实现幂等性
+
+在手动提交模式下，如果消息处理成功但提交 offset 前消费者崩溃，重启后会重新处理该消息。
+
+**解决方案：**
+- 实现幂等性：确保多次处理同一消息不会产生副作用
+- 使用去重器：结合现有的消息去重功能
+
+```go
+// 幂等性示例
+func processOrder(order Order) error {
+    // 先检查是否已处理
+    if isOrderProcessed(order.ID) {
+        log.Printf("订单已处理，跳过: ID=%d", order.ID)
+        return nil
+    }
+    
+    // 处理订单
+    // ...
+    
+    // 标记为已处理
+    markOrderAsProcessed(order.ID)
+    return nil
+}
+```
+
+#### 4. 死信队列处理
+
+达到最大重试次数后，消息会被跳过。建议将这些消息发送到死信队列进行人工处理。
+
+```go
+func sendToDeadLetterQueue(msg kafka.Message, err error) {
+    deadLetterMsg := kafka.Message{
+        Topic: msg.Topic + ".dlq",
+        Key:   msg.Key,
+        Value: msg.Value,
+        Headers: []kafka.Header{
+            {Key: "original_topic", Value: []byte(msg.Topic)},
+            {Key: "error", Value: []byte(err.Error())},
+            {Key: "timestamp", Value: []byte(time.Now().Format(time.RFC3339))},
+        },
+    }
+    
+    kafka.Publish(context.Background(), deadLetterMsg.Topic, 
+        string(deadLetterMsg.Key), deadLetterMsg.Value)
+}
+```
+
+#### 5. 监控和告警
+
+```go
+// 监控指标
+var (
+    messagesProcessed = prometheus.NewCounterVec(...)
+    messagesFailed    = prometheus.NewCounterVec(...)
+    messageRetryCount = prometheus.NewHistogram(...)
+)
+
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    startTime := time.Now()
+    err := processMessage(msg)
+    duration := time.Since(startTime)
+    
+    if err != nil {
+        messagesFailed.WithLabelValues(topic).Inc()
+    } else {
+        messagesProcessed.WithLabelValues(topic).Inc()
+    }
+    
+    messageRetryCount.Observe(duration.Seconds())
+    return err
+}
+```
+
+#### 6. 优雅关闭
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+// 监听信号
+go func() {
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+    sig := <-sigChan
+    log.Printf("收到信号: %v，准备关闭...", sig)
+    cancel()
+}()
+
+// 启动消费
+if err := consumer.Subscribe(ctx, handler); err != nil {
+    if err == context.Canceled {
+        log.Println("消费者已优雅关闭")
+    }
+}
+```
+
 ## ❓ 常见问题
 
 ### Q1: 如何选择单主题还是多主题模式？
@@ -1700,6 +2233,13 @@ MIT License
 **注意**：使用前请确保已部署并运行 Kafka 集群。推荐使用 Kafka 2.x 或更高版本。
 
 **版本信息**：
-- 当前版本：v1.0.0
+- 当前版本：v1.1.0
 - Kafka SDK 版本：v0.4.51
 - Go 版本要求：1.24.2+
+
+**主要更新**：
+- ✅ 新增消息确认机制（手动/自动提交 offset）
+- ✅ 新增内置重试机制（指数退避策略）
+- ✅ 新增 MessageContext 消息上下文
+- ✅ 新增起始 Offset 配置选项
+- ✅ 完善最佳实践和常见问题文档

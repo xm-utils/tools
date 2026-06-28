@@ -18,4 +18,11 @@ type Config struct {
 	MinBytes      int           `yaml:"min_bytes"`      // 最小字节数
 	MaxBytes      int           `yaml:"max_bytes"`      // 最大字节数
 	QueueCapacity int           `yaml:"queue_capacity"` // 队列容量
+
+	// 消费者确认相关配置
+	CommitInterval time.Duration `yaml:"commit_interval"` // 自动提交间隔（默认0表示手动提交）
+	AutoCommit     bool          `yaml:"auto_commit"`     // 是否自动提交offset（默认false，推荐手动提交）
+	StartOffset    int64         `yaml:"start_offset"`    // 起始offset（-2: FirstOffset, -1: LastOffset）
+	MaxRetries     int           `yaml:"max_retries"`     // 消息处理最大重试次数
+	RetryBackoff   time.Duration `yaml:"retry_backoff"`   // 重试退避时间
 }

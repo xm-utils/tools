@@ -34,7 +34,7 @@ func (c *Condition) Eq(b bool, col string, args interface{}) *Condition {
 	return c
 }
 
-func (c *Condition) In(b bool, col string, args []interface{}) *Condition {
+func (c *Condition) In(b bool, col string, args ...interface{}) *Condition {
 	if !b {
 		return c
 	}

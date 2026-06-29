@@ -23,6 +23,27 @@ func NewCondition() *Condition {
 	c := &Condition{}
 	return c
 }
+func Eq(col string, arg any) *Condition {
+	return NewCondition().Eq(true, col, arg)
+}
+func In(col string, arg any) *Condition {
+	return NewCondition().In(true, col, arg)
+}
+func Like(col string, arg any) *Condition {
+	return NewCondition().Like(true, col, arg)
+}
+func NotLike(col string, arg any) *Condition {
+	return NewCondition().NotLike(true, col, arg)
+}
+func LLike(col string, arg any) *Condition {
+	return NewCondition().LLike(true, col, arg)
+}
+func RLike(col string, arg any) *Condition {
+	return NewCondition().RLike(true, col, arg)
+}
+func Between(col string, start, end any) *Condition {
+	return NewCondition().Between(true, col, start, end)
+}
 
 func (c *Condition) Eq(b bool, col string, arg any) *Condition {
 	if !b {
@@ -34,7 +55,6 @@ func (c *Condition) Eq(b bool, col string, arg any) *Condition {
 	})
 	return c
 }
-
 func (c *Condition) In(b bool, col string, args any) *Condition {
 	if !b {
 		return c
@@ -52,7 +72,6 @@ func (c *Condition) In(b bool, col string, args any) *Condition {
 	})
 	return c
 }
-
 func (c *Condition) Like(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
@@ -63,7 +82,6 @@ func (c *Condition) Like(b bool, col string, arg any) *Condition {
 	})
 	return c
 }
-
 func (c *Condition) NotLike(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
@@ -74,7 +92,6 @@ func (c *Condition) NotLike(b bool, col string, arg any) *Condition {
 	})
 	return c
 }
-
 func (c *Condition) LLike(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
@@ -95,7 +112,6 @@ func (c *Condition) RLike(b bool, col string, arg any) *Condition {
 	})
 	return c
 }
-
 func (c *Condition) Between(b bool, col string, start, end any) *Condition {
 	if !b {
 		return c

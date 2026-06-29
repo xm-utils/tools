@@ -2,13 +2,14 @@ package database
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
 type condValue struct {
 	cond *Condition
 	sql  string
-	args interface{}
+	args []any // 统一使用切片存储参数，支持单个或多个占位符
 }
 
 // Condition struct.
@@ -23,79 +24,85 @@ func NewCondition() *Condition {
 	return c
 }
 
-func (c *Condition) Eq(b bool, col string, args interface{}) *Condition {
+func (c *Condition) Eq(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
 		sql:  col + " = ?",
-		args: args,
+		args: []any{arg},
 	})
 	return c
 }
 
-func (c *Condition) In(b bool, col string, args ...interface{}) *Condition {
+func (c *Condition) In(b bool, col string, args any) *Condition {
 	if !b {
 		return c
 	}
+
+	v := reflect.ValueOf(args)
+	kind := v.Kind()
+	if kind != reflect.Slice && kind != reflect.Array {
+		return c
+	}
+
 	c.params = append(c.params, condValue{
 		sql:  col + " in ?",
-		args: args,
+		args: []any{args}, // 整个切片作为一个参数
 	})
 	return c
 }
 
-func (c *Condition) Like(b bool, col string, args interface{}) *Condition {
+func (c *Condition) Like(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
 		sql:  col + " like ?",
-		args: fmt.Sprintf("%s%s%s", " %%", args, " %%"),
+		args: []any{fmt.Sprintf("%s%s%s", " %%", arg, " %%%")},
 	})
 	return c
 }
 
-func (c *Condition) NotLike(b bool, col string, args interface{}) *Condition {
+func (c *Condition) NotLike(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
 		sql:  col + " not like ?",
-		args: fmt.Sprintf("%s%s%s", " %%", args, " %%"),
+		args: []any{fmt.Sprintf("%s%s%s", " %%", arg, " %%%")},
 	})
 	return c
 }
 
-func (c *Condition) LLike(b bool, col string, args interface{}) *Condition {
+func (c *Condition) LLike(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
-		sql: col + " like ?",
-
-		args: fmt.Sprintf("%s%s", " %%", args),
+		sql:  col + " like ?",
+		args: []any{fmt.Sprintf("%s%s", " %%", arg)},
 	})
 	return c
 }
-func (c *Condition) RLike(b bool, col string, args interface{}) *Condition {
+func (c *Condition) RLike(b bool, col string, arg any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
-		sql: col + " like ?",
-
-		args: fmt.Sprintf("%s%s", args, " %%"),
+		sql:  col + " like ?",
+		args: []any{fmt.Sprintf("%s%s", arg, " %%%")},
 	})
 	return c
 }
 
-func (c *Condition) Between(b bool, col, start, end string) *Condition {
+func (c *Condition) Between(b bool, col string, start, end any) *Condition {
 	if !b {
 		return c
 	}
 	c.params = append(c.params, condValue{
-		sql: fmt.Sprintf("%s BETWEEN %s AND %s", col, start, end),
+		sql:  fmt.Sprintf("%s BETWEEN ? AND ?", col),
+		args: []any{start, end}, // 两个参数对应两个占位符
 	})
 	return c
 }
@@ -105,14 +112,14 @@ func (c *Condition) IsEmpty() bool {
 	return len(c.params) == 0
 }
 
-func (c *Condition) GormWhere() (string, []interface{}) {
+func (c *Condition) GormWhere() (string, []any) {
 	sqls := make([]string, 0)
+	vals := make([]any, 0)
 
-	vals := make([]interface{}, 0)
 	for _, param := range c.params {
 		sqls = append(sqls, param.sql)
-		vals = append(vals, param.args)
+		// 将每个条件的参数展开添加到总参数列表
+		vals = append(vals, param.args...)
 	}
 	return strings.Join(sqls, " AND "), vals
-
 }

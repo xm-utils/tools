@@ -2,7 +2,6 @@ package breaker
 
 import (
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 )
@@ -170,7 +169,7 @@ func TestCircuitBreaker_Metrics(t *testing.T) {
 		t.Errorf("期望失败请求数为3, 实际为: %d", metrics.FailedRequests)
 	}
 
-	fmt.Printf("指标快照: %+v\n", metrics)
+	t.Logf("指标快照: %+v\n", metrics)
 }
 
 // TestCircuitBreakerManager_Singleton 测试管理器单例

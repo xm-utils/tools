@@ -3,7 +3,6 @@ package grpcx
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 
@@ -32,10 +31,10 @@ type Server struct {
 	log     *logrus.Entry
 }
 
-func NewServer(servers []IServer, log *logrus.Logger) *Server {
+func NewServer(servers []IServer) *Server {
 	s := &Server{
 		servers: servers,
-		log:     log.WithField("model", "GatewayGrpcServer"),
+		log:     logrus.WithField("model", "GatewayGrpcServer"),
 	}
 	return s
 }
@@ -143,9 +142,9 @@ func (s *HTTPServer) Start() error {
 }
 func (s *HTTPServer) stop() {
 	if err := s.server.Shutdown(context.Background()); nil != err && http.ErrServerClosed != err {
-		log.Printf("server shutdown: %s\n", err)
+		logrus.Errorf("server shutdown: %s\n", err)
 	}
-	log.Println("server exiting")
+	logrus.Debugf("server exiting")
 }
 func (s *HTTPServer) typeCode() string {
 	return "http"

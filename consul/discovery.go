@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/hashicorp/consul/api"
+	"github.com/sirupsen/logrus"
 )
 
 // ServiceDiscovery 服务发现结果
@@ -25,7 +26,7 @@ func (c *Client) DiscoverServices(serviceName string, passingOnly bool) ([]*Serv
 		return nil, fmt.Errorf("failed to discover services: %w", err)
 	}
 
-	fmt.Printf("Query Meta: %+v\n", meta)
+	logrus.Debugf("Query Meta: %+v", meta)
 
 	var discoveries []*ServiceDiscovery
 	for _, entry := range entries {
@@ -63,7 +64,7 @@ func (c *Client) DiscoverServicesWithTags(serviceName string, tags []string, pas
 		return nil, fmt.Errorf("failed to discover services with tags: %w", err)
 	}
 
-	fmt.Printf("Query Meta: %+v\n", meta)
+	logrus.Debugf("Query Meta: %+v", meta)
 
 	var discoveries []*ServiceDiscovery
 	for _, entry := range entries {

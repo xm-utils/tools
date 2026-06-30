@@ -3,10 +3,10 @@ package nacos
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/nacos-group/nacos-sdk-go/v2/model"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/resolver"
 )
 
@@ -27,7 +27,7 @@ type ResolverBuilder struct {
 func NewResolverBuilder(config *Config) *ResolverBuilder {
 	client, err := NewNamingClient(config)
 	if err != nil {
-		log.Fatalf("nacos客户端加载失败，error=%v", err)
+		logrus.Errorf("nacos客户端加载失败，error=%v", err)
 		return nil
 	}
 	return &ResolverBuilder{
@@ -59,7 +59,7 @@ func (b *ResolverBuilder) Build(target resolver.Target, cc resolver.ClientConn, 
 		cluster = defaultClusterName
 	}
 
-	log.Printf("[Nacos Resolver] Building resolver for service: %s, group: %s, cluster: %s", serviceName, group, cluster)
+	logrus.Debugf("[Nacos Resolver] Building resolver for service: %s, group: %s, cluster: %s", serviceName, group, cluster)
 
 	// 创建 resolver 实例
 	r := &nacosResolver{
@@ -98,17 +98,17 @@ func (r *nacosResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	log.Printf("[Nacos Resolver] Resolving service: %s", r.serviceName)
+	logrus.Debugf("[Nacos Resolver] Resolving service: %s", r.serviceName)
 
 	// 使用 nacos 工具函数查询服务实例
 	ins, err := r.client.SelectInstances(r.serviceName, true)
 	if err != nil {
-		log.Printf("[Nacos Resolver] Failed to select instances: %v", err)
+		logrus.Errorf("[Nacos Resolver] Failed to select instances: %v", err)
 		return
 	}
 
 	if len(ins) == 0 {
-		log.Printf("[Nacos Resolver] No healthy instances found for service: %s", r.serviceName)
+		logrus.Debugf("[Nacos Resolver] No healthy instances found for service: %s", r.serviceName)
 		r.updateAddresses([]resolver.Address{})
 		return
 	}
@@ -122,18 +122,18 @@ func (r *nacosResolver) ResolveNow(opts resolver.ResolveNowOptions) {
 			Attributes: nil,
 		}
 		addresses = append(addresses, addr)
-		log.Printf("[Nacos Resolver] Found instance: %s:%d, weight: %.2f, healthy: %v",
+		logrus.Debugf("[Nacos Resolver] Found instance: %s:%d, weight: %.2f, healthy: %v",
 			instance.Ip, instance.Port, instance.Weight, instance.Healthy)
 	}
 
 	r.updateAddresses(addresses)
-	log.Printf("[Nacos Resolver] Resolved %d instances for service: %s", len(addresses), r.serviceName)
+	logrus.Debugf("[Nacos Resolver] Resolved %d instances for service: %s", len(addresses), r.serviceName)
 }
 
 // Close 实现 resolver.Resolver 接口
 func (r *nacosResolver) Close() {
 	r.cancelWatch()
-	log.Printf("[Nacos Resolver] Closed resolver for service: %s", r.serviceName)
+	logrus.Debugf("[Nacos Resolver] Closed resolver for service: %s", r.serviceName)
 }
 
 // startWatch 启动服务变化监听
@@ -143,11 +143,11 @@ func (r *nacosResolver) startWatch() {
 
 	callback := func(services []model.Instance, err error) {
 		if err != nil {
-			log.Printf("[Nacos Resolver] Watch callback error: %v", err)
+			logrus.Errorf("[Nacos Resolver] Watch callback error: %v", err)
 			return
 		}
 
-		log.Printf("[Nacos Resolver] Service changed, instances count: %d", len(services))
+		logrus.Debugf("[Nacos Resolver] Service changed, instances count: %d", len(services))
 
 		// 过滤健康实例
 		addresses := make([]resolver.Address, 0)
@@ -172,22 +172,22 @@ func (r *nacosResolver) startWatch() {
 		SubscribeCallback: callback,
 	})
 	if err != nil {
-		log.Printf("[Nacos Resolver] Failed to subscribe service: %v", err)
+		logrus.Errorf("[Nacos Resolver] Failed to subscribe service: %v", err)
 		return
 	}
 
-	log.Printf("[Nacos Resolver] Started watching service: %s", r.serviceName)
+	logrus.Debugf("[Nacos Resolver] Started watching service: %s", r.serviceName)
 
 	// 保持订阅直到取消
 	go func() {
 		<-ctx.Done()
-		log.Printf("[Nacos Resolver] Stopped watching service: %s", r.serviceName)
+		logrus.Debugf("[Nacos Resolver] Stopped watching service: %s", r.serviceName)
 	}()
 }
 
 // updateAddresses 更新地址列表
 func (r *nacosResolver) updateAddresses(addresses []resolver.Address) {
 	if err := r.cc.UpdateState(resolver.State{Addresses: addresses}); err != nil {
-		log.Printf("[Nacos Resolver] Failed to update state: %v", err)
+		logrus.Errorf("[Nacos Resolver] Failed to update state: %v", err)
 	}
 }

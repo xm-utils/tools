@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
-	gormLogger "gorm.io/gorm/logger"
+	"gorm.io/gorm/logger"
 )
 
 // DBManager GORM数据库管理器
@@ -49,17 +50,17 @@ func InitGorm(config *MysqlConfig) error {
 	}
 
 	dsn := config.Url()
-	fmt.Printf("GORM数据库连接配置: %s \n", dsn)
+	logrus.Debugf("GORM数据库连接配置: %s \n", dsn)
 
 	// 配置日志级别
-	logLevel := gormLogger.Silent
+	logLevel := logger.Silent
 	if config.Debug == "true" {
-		logLevel = gormLogger.Info
+		logLevel = logger.Info
 	}
 
 	// 打开数据库连接
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger:                                   gormLogger.Default.LogMode(logLevel),
+		Logger:                                   logger.Default.LogMode(logLevel),
 		SkipDefaultTransaction:                   true, // 跳过默认事务，提升性能
 		DisableForeignKeyConstraintWhenMigrating: true, // 禁用外键约束
 	})
@@ -83,7 +84,7 @@ func InitGorm(config *MysqlConfig) error {
 	//gormTablePrefix = config.TablePrefix
 	SetPrefix(config.TablePrefix)
 
-	fmt.Printf("GORM数据库连接池配置 - Alias: %s, MaxIdle: %d, MaxOpen: %d, MaxLifetime: %ds, MaxIdleTime: %d \n",
+	logrus.Debugf("GORM数据库连接池配置 - Alias: %s, MaxIdle: %d, MaxOpen: %d, MaxLifetime: %ds, MaxIdleTime: %d \n",
 		config.Alias, config.MaxIdleConns, config.MaxOpenConns, config.ConnMaxLifetime, config.ConnMaxIdleTime)
 
 	return nil

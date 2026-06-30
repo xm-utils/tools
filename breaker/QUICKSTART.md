@@ -251,69 +251,66 @@ config.FallbackFunc = func(args ...interface{}) (interface{}, error) {
 package main
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log"
-    "time"
-    
-    "github.com/xm-utils/tools/breaker"
+	"fmt"
+	"time"
+
+	"github.com/xm-utils/tools/breaker"
 )
 
 func main() {
-    // 1. 初始化熔断器管理器
-    manager := breaker.GetManager()
-    
-    // 2. 配置支付服务熔断器
-    paymentConfig := breaker.DefaultCircuitBreakerConfig()
-    paymentConfig.ErrorThreshold = 0.4
-    paymentConfig.MinRequests = 20
-    paymentConfig.FallbackFunc = func(args ...interface{}) (interface{}, error) {
-        log.Warn("支付服务降级: 返回排队状态")
-        return map[string]string{"status": "queued"}, nil
-    }
-    
-    paymentCB := manager.GetOrCreateBreaker("payment-service", paymentConfig)
-    
-    // 3. 模拟业务调用
-    for i := 0; i < 100; i++ {
-        go func(id int) {
-            result, err := paymentCB.Execute(func() (interface{}, error) {
-                return processPayment(id)
-            })
-            
-            if err != nil {
-                log.Printf("支付失败: %v", err)
-            } else {
-                log.Printf("支付成功: %v", result)
-            }
-        }(i)
-        
-        time.Sleep(100 * time.Millisecond)
-    }
-    
-    // 4. 定期打印指标
-    ticker := time.NewTicker(10 * time.Second)
-    for range ticker.C {
-        metrics := manager.GetAllMetrics()
-        for name, m := range metrics {
-            fmt.Printf("[%s] 请求:%d 成功率:%.2f%% 拒绝率:%.2f%%\n", 
-                name, 
-                m.TotalRequests,
-                m.SuccessRate*100,
-                m.RejectionRate*100,
-            )
-        }
-    }
+	// 1. 初始化熔断器管理器
+	manager := breaker.GetManager()
+
+	// 2. 配置支付服务熔断器
+	paymentConfig := breaker.DefaultCircuitBreakerConfig()
+	paymentConfig.ErrorThreshold = 0.4
+	paymentConfig.MinRequests = 20
+	paymentConfig.FallbackFunc = func(args ...interface{}) (interface{}, error) {
+		fmt.Println("支付服务降级: 返回排队状态")
+		return map[string]string{"status": "queued"}, nil
+	}
+
+	paymentCB := manager.GetOrCreateBreaker("payment-service", paymentConfig)
+
+	// 3. 模拟业务调用
+	for i := 0; i < 100; i++ {
+		go func(id int) {
+			result, err := paymentCB.Execute(func() (interface{}, error) {
+				return processPayment(id)
+			})
+
+			if err != nil {
+				fmt.Printf("支付失败: %v", err)
+			} else {
+				fmt.Printf("支付成功: %v", result)
+			}
+		}(i)
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 4. 定期打印指标
+	ticker := time.NewTicker(10 * time.Second)
+	for range ticker.C {
+		metrics := manager.GetAllMetrics()
+		for name, m := range metrics {
+			fmt.Printf("[%s] 请求:%d 成功率:%.2f%% 拒绝率:%.2f%%\n",
+				name,
+				m.TotalRequests,
+				m.SuccessRate*100,
+				m.RejectionRate*100,
+			)
+		}
+	}
 }
 
 func processPayment(id int) (interface{}, error) {
-    // 模拟支付处理
-    time.Sleep(50 * time.Millisecond)
-    return map[string]interface{}{
-        "orderId": id,
-        "status":  "success",
-    }, nil
+	// 模拟支付处理
+	time.Sleep(50 * time.Millisecond)
+	return map[string]interface{}{
+		"orderId": id,
+		"status":  "success",
+	}, nil
 }
 ```
 
@@ -323,6 +320,7 @@ func processPayment(id int) (interface{}, error) {
 package httpclient
 
 import (
+	"fmt"
     "io"
     "net/http"
     "time"
@@ -369,15 +367,15 @@ func (c *ProtectedHTTPClient) Get(url string) ([]byte, error) {
 
 // 使用示例
 func Example() {
-    client := NewProtectedHTTPClient("api-service")
+    http_client := NewProtectedHTTPClient("api-service")
     
-    data, err := client.Get("https://api.example.com/data")
+    data, err := http_client.Get("https://api.example.com/data")
     if err != nil {
-        log.Printf("请求失败: %v", err)
+        fmt.Printf("请求失败: %v", err)
         return
     }
     
-    log.Printf("获取数据: %s", string(data))
+    fmt.Printf("获取数据: %s", string(data))
 }
 ```
 

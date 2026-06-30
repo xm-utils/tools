@@ -1,9 +1,10 @@
 package kafka
 
 import (
-	"fmt"
 	"sync"
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // MemoryDeduplicationStore 基于内存的去重存储（适用于单机或测试环境）
@@ -90,7 +91,7 @@ func (s *MemoryDeduplicationStore) cleanup() {
 	}
 
 	if count > 0 {
-		fmt.Printf("清理了 %d 条过期的去重记录\n", count)
+		logrus.Debugf("清理了 %d 条过期的去重记录\n", count)
 	}
 }
 

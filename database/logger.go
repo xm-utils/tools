@@ -57,7 +57,7 @@ func NewLog(config logger.Config, logDir string) logger.Interface {
 
 	return &gormLog{
 		Config:       config,
-		log:          logrus.WithField("module", "GORM"),
+		log:          log.WithField("module", "GORM"),
 		traceStr:     traceStr,
 		traceWarnStr: traceWarnStr,
 		traceErrStr:  traceErrStr,

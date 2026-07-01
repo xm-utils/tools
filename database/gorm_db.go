@@ -60,7 +60,7 @@ func InitGorm(config *MysqlConfig) error {
 
 	// 打开数据库连接
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger: logger.New(logrus.StandardLogger(), logger.Config{
+		Logger: NewLog(logger.Config{
 			SlowThreshold:             200 * time.Millisecond,
 			LogLevel:                  logLevel,
 			IgnoreRecordNotFoundError: false,

@@ -4,25 +4,69 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm/logger"
 )
 
-const module = "GORM"
+// Colors
+const (
+	Reset       = "\033[0m"
+	Red         = "\033[31m"
+	Green       = "\033[32m"
+	Yellow      = "\033[33m"
+	Blue        = "\033[34m"
+	Magenta     = "\033[35m"
+	Cyan        = "\033[36m"
+	White       = "\033[37m"
+	BlueBold    = "\033[34;1m"
+	MagentaBold = "\033[35;1m"
+	RedBold     = "\033[31;1m"
+	YellowBold  = "\033[33;1m"
+)
 
 // NewLog initialize logger
-func NewLog(config logger.Config) logger.Interface {
+func NewLog(config logger.Config, logDir string) logger.Interface {
+
 	var (
-		traceStr     = "[%.3fms] [rows:%v] %s"
-		traceWarnStr = "%s [%.3fms] [rows:%v] \n SQL: %s"
-		traceErrStr  = "%s [%.3fms] [rows:%v] \n SQL: %s"
+		infoStr      = "%s\n[info] "
+		warnStr      = "%s\n[warn] "
+		errStr       = "%s\n[error] "
+		traceStr     = "%s\n[%.3fms] [rows:%v] %s"
+		traceWarnStr = "%s %s\n[%.3fms] [rows:%v] %s"
+		traceErrStr  = "%s %s\n[%.3fms] [rows:%v] %s"
 	)
+
+	if config.Colorful {
+		infoStr = Green + "%s\n" + Reset + Green + "[info] " + Reset
+		warnStr = BlueBold + "%s\n" + Reset + Magenta + "[warn] " + Reset
+		errStr = Magenta + "%s\n" + Reset + Red + "[error] " + Reset
+		traceStr = Green + "%s\n" + Reset + Yellow + "[%.3fms] " + BlueBold + "[rows:%v]" + Reset + " %s"
+		traceWarnStr = Green + "%s " + Yellow + "%s\n" + Reset + RedBold + "[%.3fms] " + Yellow + "[rows:%v]" + Magenta + " %s" + Reset
+		traceErrStr = RedBold + "%s " + MagentaBold + "%s\n" + Reset + Yellow + "[%.3fms] " + BlueBold + "[rows:%v]" + Reset + " %s"
+	}
+	log := logrus.New()
+	log.SetLevel(logrus.InfoLevel)
+	log.SetReportCaller(true)
+
+	if logDir == "" {
+		logDir = "./logs"
+	}
+
+	hook, err := NewLogrusFileLoggerHook(logDir, 10<<20)
+	if err == nil {
+		log.AddHook(hook)
+	}
 
 	return &gormLog{
 		Config:       config,
 		log:          logrus.WithField("module", "GORM"),
+		infoStr:      infoStr,
+		warnStr:      warnStr,
+		errStr:       errStr,
 		traceStr:     traceStr,
 		traceWarnStr: traceWarnStr,
 		traceErrStr:  traceErrStr,
@@ -32,6 +76,7 @@ func NewLog(config logger.Config) logger.Interface {
 type gormLog struct {
 	logger.Config
 	log                                 *logrus.Entry
+	infoStr, warnStr, errStr            string
 	traceStr, traceErrStr, traceWarnStr string
 }
 
@@ -104,4 +149,104 @@ func (l *gormLog) ParamsFilter(ctx context.Context, sql string, params ...interf
 		return sql, nil
 	}
 	return sql, params
+}
+
+// LogrusFileLoggerHook /文件日志Hook
+type LogrusFileLoggerHook struct {
+	maxLogSize int64
+	logDir     string
+	logPath    string
+	logFile    *os.File
+}
+
+// NewLogrusFileLoggerHook /工厂方法
+func NewLogrusFileLoggerHook(logDir string, maxLogSize int64) (hook *LogrusFileLoggerHook, err error) {
+	object := &LogrusFileLoggerHook{
+		maxLogSize: maxLogSize,
+		logDir:     logDir,
+	}
+	return object, object.makeLogFile()
+}
+
+// /创建日志文件
+func (object *LogrusFileLoggerHook) makeLogFile() error {
+	var err error
+	if filepath.IsAbs(object.logDir) {
+		object.logPath = object.logDir
+	} else {
+		dir, err := os.Getwd()
+		if nil != err {
+			panic(err)
+		}
+		object.logPath = filepath.Join(dir, object.logDir)
+	}
+	err = os.MkdirAll(object.logDir, 0777)
+	if nil != err {
+		panic(err)
+	}
+	logTAG := "GORM"
+
+	now := time.Now()
+	object.logPath += fmt.Sprintf("%s%s-%04d-%02d-%02dT%02d-%02d-%02d.%d.log",
+		string(filepath.Separator),
+		logTAG,
+		now.Year(),
+		now.Month(),
+		now.Day(),
+		now.Hour(),
+		now.Minute(),
+		now.Second(),
+		os.Getpid())
+	if nil != object.logFile {
+		err = object.logFile.Close()
+		if nil != err {
+			return err
+		}
+	}
+	object.logFile, err = os.OpenFile(object.logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
+	if nil != err {
+		return err
+	}
+	return nil
+}
+
+// Levels /日志等级回调
+func (object *LogrusFileLoggerHook) Levels() []logrus.Level {
+	return logrus.AllLevels
+}
+
+// Fire /激发
+func (object *LogrusFileLoggerHook) Fire(entry *logrus.Entry) error {
+	if size, err := FileSize(object.logPath); nil != err {
+		return err
+	} else if size > object.maxLogSize {
+		if err = object.makeLogFile(); nil != err {
+			return err
+		}
+	}
+	content, err := entry.String()
+	if nil != err {
+		return err
+	}
+	_, err = object.logFile.Write([]byte(content))
+	if nil != err {
+		return err
+	}
+	return nil
+}
+
+// FileSize 文件大小
+func FileSize(path string) (size int64, err error) {
+	if 0 >= len(path) {
+		err = errors.New("invalid path")
+		return
+	}
+
+	var fi os.FileInfo
+	fi, err = os.Stat(path)
+	if nil == err {
+		size = fi.Size()
+	}
+
+	return
 }

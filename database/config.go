@@ -20,7 +20,7 @@ type MysqlConfig struct {
 	TablePrefix string `yaml:"db_table_prefix" json:"tablePrefix" comment:"表前缀"`
 	Charset     string `yaml:"db_charset,omitempty" json:"charset" comment:"字符集类型"`
 	Location    string `yaml:"db_location,omitempty" json:"timeLocation" comment:"时区"`
-
+	LogDir      string `yaml:"db_log_dir" json:"logDir" comment:"日志目录"`
 	// 连接池配置
 	MaxIdleConns    int `yaml:"db_max_idle_conns" json:"maxIdleConns" comment:"最大空闲连接数"`            // 最大空闲连接数
 	MaxOpenConns    int `yaml:"db_max_open_conns" json:"maxOpenConns" comment:"最大打开连接数"`            // 最大打开连接数

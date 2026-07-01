@@ -65,7 +65,7 @@ func InitGorm(config *MysqlConfig) error {
 			LogLevel:                  logLevel,
 			IgnoreRecordNotFoundError: false,
 			Colorful:                  true,
-		}),
+		}, config.LogDir),
 		SkipDefaultTransaction:                   true, // 跳过默认事务，提升性能
 		DisableForeignKeyConstraintWhenMigrating: true, // 禁用外键约束
 	})

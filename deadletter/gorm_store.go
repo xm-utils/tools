@@ -27,6 +27,8 @@ func NewGormPersistenceStore(db *gorm.DB, tableName string) *GormPersistenceStor
 
 // Save 保存死信消息记录
 func (s *GormPersistenceStore) Save(ctx context.Context, record *QueueMsgRecord) error {
+	record.CreatedTime = time.Now()
+	record.UpdatedTime = time.Now()
 	return s.db.WithContext(ctx).Table(s.tableName).Create(record).Error
 }
 
@@ -38,7 +40,7 @@ func (s *GormPersistenceStore) UpdateStatus(ctx context.Context, queueKey, messa
 	if processedTime != nil {
 		updates["processed_time"] = processedTime
 	}
-
+	updates["updated_time"] = time.Now()
 	return s.db.WithContext(ctx).Table(s.tableName).
 		Where("queue_key = ? AND message_id = ?", queueKey, messageID).
 		Updates(updates).Error
@@ -53,6 +55,7 @@ func (s *GormPersistenceStore) UpdateRetryInfo(ctx context.Context, queueKey, me
 			"error_message":   errorMessage,
 			"last_error_time": lastErrorTime,
 			"next_retry_time": nextRetryTime,
+			"updated_time":    time.Now(),
 		}).Error
 }
 

@@ -28,6 +28,13 @@ const (
 	YellowBold  = "\033[33;1m"
 )
 
+type Formater struct {
+}
+
+func (f *Formater) Format(entry *logrus.Entry) ([]byte, error) {
+	return []byte(entry.Message), nil
+}
+
 // NewLog initialize logger
 func NewLog(config logger.Config, logDir string) logger.Interface {
 
@@ -45,6 +52,7 @@ func NewLog(config logger.Config, logDir string) logger.Interface {
 	log := logrus.New()
 	log.SetLevel(logrus.InfoLevel)
 	log.SetReportCaller(true)
+	log.SetFormatter(new(Formater))
 
 	if logDir == "" {
 		logDir = "./logs"

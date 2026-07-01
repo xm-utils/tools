@@ -60,7 +60,12 @@ func InitGorm(config *MysqlConfig) error {
 
 	// 打开数据库连接
 	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{
-		Logger:                                   logger.Default.LogMode(logLevel),
+		Logger: logger.New(logrus.StandardLogger(), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logLevel,
+			IgnoreRecordNotFoundError: false,
+			Colorful:                  true,
+		}),
 		SkipDefaultTransaction:                   true, // 跳过默认事务，提升性能
 		DisableForeignKeyConstraintWhenMigrating: true, // 禁用外键约束
 	})

@@ -15,20 +15,14 @@ const module = "GORM"
 // NewLog initialize logger
 func NewLog(config logger.Config) logger.Interface {
 	var (
-		infoStr      = "[%s] [info] "
-		warnStr      = "[%s] [warn] "
-		errStr       = "[%s] [error] "
-		traceStr     = "[%s] [%.3fms] [rows:%v] %s"
-		traceWarnStr = "[%s] %s [%.3fms] [rows:%v] %s"
-		traceErrStr  = "[%s] %s [%.3fms] [rows:%v] %s"
+		traceStr     = "[%.3fms] [rows:%v] %s"
+		traceWarnStr = "%s [%.3fms] [rows:%v] \n SQL: %s"
+		traceErrStr  = "%s [%.3fms] [rows:%v] \n SQL: %s"
 	)
 
 	return &gormLog{
-		Writer:       logrus.StandardLogger(),
 		Config:       config,
-		infoStr:      infoStr,
-		warnStr:      warnStr,
-		errStr:       errStr,
+		log:          logrus.WithField("module", "GORM"),
 		traceStr:     traceStr,
 		traceWarnStr: traceWarnStr,
 		traceErrStr:  traceErrStr,
@@ -36,9 +30,8 @@ func NewLog(config logger.Config) logger.Interface {
 }
 
 type gormLog struct {
-	logger.Writer
 	logger.Config
-	infoStr, warnStr, errStr            string
+	log                                 *logrus.Entry
 	traceStr, traceErrStr, traceWarnStr string
 }
 
@@ -52,21 +45,21 @@ func (l *gormLog) LogMode(level logger.LogLevel) logger.Interface {
 // Info print info
 func (l *gormLog) Info(ctx context.Context, msg string, data ...interface{}) {
 	if l.LogLevel >= logger.Info {
-		l.Printf(l.infoStr+msg, append([]interface{}{module}, data...)...)
+		l.log.Infof(msg, data...)
 	}
 }
 
 // Warn print warn messages
 func (l *gormLog) Warn(ctx context.Context, msg string, data ...interface{}) {
 	if l.LogLevel >= logger.Warn {
-		l.Printf(l.warnStr+msg, append([]interface{}{module}, data...)...)
+		l.log.Warnf(msg, data...)
 	}
 }
 
 // Error print error messages
 func (l *gormLog) Error(ctx context.Context, msg string, data ...interface{}) {
 	if l.LogLevel >= logger.Error {
-		l.Printf(l.errStr+msg, append([]interface{}{module}, data...)...)
+		l.log.Errorf(msg, data...)
 	}
 }
 
@@ -83,24 +76,24 @@ func (l *gormLog) Trace(ctx context.Context, begin time.Time, fc func() (string,
 	case err != nil && l.LogLevel >= logger.Error && (!errors.Is(err, logger.ErrRecordNotFound) || !l.IgnoreRecordNotFoundError):
 		sql, rows := fc()
 		if rows == -1 {
-			l.Printf(l.traceErrStr, module, err, float64(elapsed.Nanoseconds())/1e6, "-", sql)
+			l.log.Errorf(l.traceErrStr, err, float64(elapsed.Nanoseconds())/1e6, "-", sql)
 		} else {
-			l.Printf(l.traceErrStr, module, err, float64(elapsed.Nanoseconds())/1e6, rows, sql)
+			l.log.Errorf(l.traceErrStr, err, float64(elapsed.Nanoseconds())/1e6, rows, sql)
 		}
 	case elapsed > l.SlowThreshold && l.SlowThreshold != 0 && l.LogLevel >= logger.Warn:
 		sql, rows := fc()
 		slowLog := fmt.Sprintf("SLOW SQL >= %v", l.SlowThreshold)
 		if rows == -1 {
-			l.Printf(l.traceWarnStr, module, slowLog, float64(elapsed.Nanoseconds())/1e6, "-", sql)
+			l.log.Warnf(l.traceWarnStr, slowLog, float64(elapsed.Nanoseconds())/1e6, "-", sql)
 		} else {
-			l.Printf(l.traceWarnStr, module, slowLog, float64(elapsed.Nanoseconds())/1e6, rows, sql)
+			l.log.Warnf(l.traceWarnStr, slowLog, float64(elapsed.Nanoseconds())/1e6, rows, sql)
 		}
 	case l.LogLevel == logger.Info:
 		sql, rows := fc()
 		if rows == -1 {
-			l.Printf(l.traceStr, module, float64(elapsed.Nanoseconds())/1e6, "-", sql)
+			l.log.Infof(l.traceStr, float64(elapsed.Nanoseconds())/1e6, "-", sql)
 		} else {
-			l.Printf(l.traceStr, module, float64(elapsed.Nanoseconds())/1e6, rows, sql)
+			l.log.Infof(l.traceStr, float64(elapsed.Nanoseconds())/1e6, rows, sql)
 		}
 	}
 }

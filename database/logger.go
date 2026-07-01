@@ -32,7 +32,7 @@ type Formater struct {
 }
 
 func (f *Formater) Format(entry *logrus.Entry) ([]byte, error) {
-	return []byte(entry.Message), nil
+	return []byte(entry.Message + "\n"), nil
 }
 
 // NewLog initialize logger

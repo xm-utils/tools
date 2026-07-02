@@ -56,16 +56,17 @@ func (f *Formater) Format(entry *logrus.Entry) ([]byte, error) {
 func NewLog(config logger.Config, logDir string) logger.Interface {
 
 	var (
-		traceStr     = "%s\n[%.3fms] [rows:%v] %s"
-		traceWarnStr = "%s %s\n[%.3fms] [rows:%v] %s"
-		traceErrStr  = "%s %s\n[%.3fms] [rows:%v] %s"
+		traceStr     = "[%.3fms] [rows:%v] %s"
+		traceWarnStr = "%s [%.3fms] [rows:%v] %s"
+		traceErrStr  = "%s [%.3fms] [rows:%v] %s"
 	)
 
 	if config.Colorful {
 		traceStr = Yellow + "[%.3fms] " + BlueBold + "[rows:%v]" + Reset + " %s"
-		traceWarnStr = Green + "%s\n" + Reset + RedBold + "[%.3fms] " + Yellow + "[rows:%v]" + Magenta + " %s" + Reset
-		traceErrStr = RedBold + "%s\n" + Reset + Yellow + "[%.3fms] " + BlueBold + "[rows:%v]" + Reset + " %s"
+		traceWarnStr = Green + "%s " + Reset + RedBold + "[%.3fms] " + Yellow + "[rows:%v]" + Magenta + " %s" + Reset
+		traceErrStr = RedBold + "%s " + Reset + Yellow + "[%.3fms] " + BlueBold + "[rows:%v]" + Reset + " %s"
 	}
+
 	log := logrus.New()
 	log.SetLevel(logrus.InfoLevel)
 	log.SetReportCaller(true)

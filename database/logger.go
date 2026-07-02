@@ -1,11 +1,13 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -32,7 +34,22 @@ type Formater struct {
 }
 
 func (f *Formater) Format(entry *logrus.Entry) ([]byte, error) {
-	return []byte(entry.Message + "\n"), nil
+
+	// output buffer
+	b := &bytes.Buffer{}
+
+	// write level
+	level := strings.ToUpper(entry.Level.String())
+	b.WriteString(fmt.Sprintf("[GORM] [%s] ", level[:4]))
+
+	// write time
+	b.WriteString(entry.Time.Format(time.DateTime) + " ")
+
+	// write message
+	b.WriteString(strings.TrimSpace(entry.Message))
+
+	b.WriteString(Reset + " \n")
+	return b.Bytes(), nil
 }
 
 // NewLog initialize logger
@@ -210,7 +227,10 @@ func (object *LogrusFileLoggerHook) makeLogFile() error {
 
 // Levels /日志等级回调
 func (object *LogrusFileLoggerHook) Levels() []logrus.Level {
-	return logrus.AllLevels
+	return []logrus.Level{
+		logrus.WarnLevel,
+		logrus.ErrorLevel,
+	}
 }
 
 // Fire /激发

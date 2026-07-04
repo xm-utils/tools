@@ -13,9 +13,10 @@ var defaultConsumer *Consumer
 
 // Consumer Kafka消费者
 type Consumer struct {
-	reader *kafka.Reader
-	log    *logrus.Entry
-	config *ConsumerConfig
+	reader  *kafka.Reader
+	log     *logrus.Entry
+	config  *ConsumerConfig
+	metrics *ConsumerMetrics // 性能指标收集器
 }
 
 // MessageContext 消息上下文，包含消息和确认方法
@@ -44,45 +45,52 @@ func InitConsumer(config *ConsumerConfig) error {
 		return fmt.Errorf("kafka topic or topics must be configured")
 	}
 
-	log := logrus.WithField("module", "Kafka Consumer")
-
-	// 构建 ReaderConfig
-	readerConfig := kafka.ReaderConfig{
-		Brokers:           config.Brokers,
-		GroupID:           config.GroupID,
-		MinBytes:          config.MinBytes,
-		MaxBytes:          config.MaxBytes,
-		MaxWait:           1 * time.Second,
-		ReadLagInterval:   -1,
-		HeartbeatInterval: 3 * time.Second,
-		SessionTimeout:    30 * time.Second,
-		RebalanceTimeout:  30 * time.Second,
-		StartOffset:       getStartOffset(config.StartOffset),
-		ReadBackoffMin:    100 * time.Millisecond,
-		ReadBackoffMax:    1 * time.Second,
-		CommitInterval:    config.CommitInterval,
+	consumer, err := NewConsumer(config)
+	if err != nil {
+		return fmt.Errorf("failed to create consumer: %w", err)
 	}
-
-	// 根据配置选择单主题或多主题模式
-	if len(config.Topics) > 0 {
-		// 多主题模式（需要使用 GroupTopics，且必须配合 GroupID）
-		readerConfig.GroupTopics = config.Topics
-		log.Infof("Kafka消费者初始化成功（多主题模式）: brokers=%v, topics=%v, group=%s", config.Brokers, config.Topics, config.GroupID)
-	} else {
-		// 单主题模式
-		readerConfig.Topic = config.Topic
-		log.Infof("Kafka消费者初始化成功（单主题模式）: brokers=%v, topic=%s, group=%s", config.Brokers, config.Topic, config.GroupID)
-	}
-
-	reader := kafka.NewReader(readerConfig)
-
-	defaultConsumer = &Consumer{
-		reader: reader,
-		log:    log,
-		config: config,
-	}
-
+	defaultConsumer = consumer
 	return nil
+
+	//log := logrus.WithField("module", "Kafka Consumer")
+	//// 构建 ReaderConfig
+	//readerConfig := kafka.ReaderConfig{
+	//	Brokers:           config.Brokers,
+	//	GroupID:           config.GroupID,
+	//	MinBytes:          config.MinBytes,
+	//	MaxBytes:          config.MaxBytes,
+	//	MaxWait:           1 * time.Second,
+	//	ReadLagInterval:   -1,
+	//	HeartbeatInterval: 3 * time.Second,
+	//	SessionTimeout:    30 * time.Second,
+	//	RebalanceTimeout:  30 * time.Second,
+	//	StartOffset:       getStartOffset(config.StartOffset),
+	//	ReadBackoffMin:    100 * time.Millisecond,
+	//	ReadBackoffMax:    1 * time.Second,
+	//	CommitInterval:    config.CommitInterval,
+	//}
+	//
+	//// 根据配置选择单主题或多主题模式
+	//if len(config.Topics) > 0 {
+	//	// 多主题模式（需要使用 GroupTopics，且必须配合 GroupID）
+	//	readerConfig.GroupTopics = config.Topics
+	//	log.Infof("Kafka消费者初始化成功（多主题模式）: brokers=%v, topics=%v, group=%s", config.Brokers, config.Topics, config.GroupID)
+	//} else {
+	//	// 单主题模式
+	//	readerConfig.Topic = config.Topic
+	//	log.Infof("Kafka消费者初始化成功（单主题模式）: brokers=%v, topic=%s, group=%s", config.Brokers, config.Topic, config.GroupID)
+	//}
+	//
+	//reader := kafka.NewReader(readerConfig)
+	//
+	//defaultConsumer = &Consumer{
+	//	reader:  reader,
+	//	log:     log,
+	//	config:  config,
+	//	metrics: NewConsumerMetrics(1 * time.Minute), // 默认1分钟窗口
+	//}
+	//
+	//return nil
 }
 
 // GetConsumer 获取默认消费者
@@ -98,6 +106,46 @@ func Subscribe(ctx context.Context, handler TopicHandler) error {
 	return defaultConsumer.Subscribe(ctx, handler)
 }
 
+// NewConsumer 创建消费者实例
+func NewConsumer(config *ConsumerConfig) (*Consumer, error) {
+	log := logrus.WithField("module", "Kafka Consumer")
+
+	// 构建 ReaderConfig
+	readerConfig := kafka.ReaderConfig{
+		Brokers:           config.Brokers,
+		GroupID:           config.GroupID,
+		MinBytes:          config.MinBytes,
+		MaxBytes:          config.MaxBytes,
+		MaxWait:           config.MaxWait,
+		ReadLagInterval:   config.ReadLagInterval,
+		HeartbeatInterval: config.HeartbeatInterval,
+		SessionTimeout:    config.SessionTimeout,
+		RebalanceTimeout:  config.RebalanceTimeout,
+		StartOffset:       getStartOffset(config.StartOffset),
+		ReadBackoffMin:    config.ReadBackoffMin,
+		ReadBackoffMax:    config.ReadBackoffMax,
+		CommitInterval:    config.CommitInterval,
+	}
+
+	// 根据配置选择单主题或多主题模式
+	if len(config.Topics) > 0 {
+		readerConfig.GroupTopics = config.Topics
+		log.Infof("Kafka消费者初始化成功（多主题模式）: brokers=%v, topics=%v, group=%s", config.Brokers, config.Topics, config.GroupID)
+	} else {
+		readerConfig.Topic = config.Topic
+		log.Infof("Kafka消费者初始化成功（单主题模式）: brokers=%v, topic=%s, group=%s", config.Brokers, config.Topic, config.GroupID)
+	}
+
+	reader := kafka.NewReader(readerConfig)
+
+	return &Consumer{
+		reader:  reader,
+		log:     log,
+		config:  config,
+		metrics: NewConsumerMetrics(1 * time.Minute), // 默认1分钟窗口
+	}, nil
+}
+
 // Subscribe 订阅消息
 func (c *Consumer) Subscribe(ctx context.Context, handler TopicHandler) error {
 	c.log.Info("开始订阅Kafka消息...")
@@ -108,10 +156,22 @@ func (c *Consumer) Subscribe(ctx context.Context, handler TopicHandler) error {
 			c.log.Info("Kafka消费者停止")
 			return ctx.Err()
 		default:
+			fetchStart := time.Now()
 			msg, err := c.reader.ReadMessage(ctx)
+			fetchDuration := time.Since(fetchStart)
+
 			if err != nil {
 				c.log.Errorf("Kafka读取消息失败: %v", err)
+				// 记录错误
+				if c.metrics != nil {
+					c.metrics.RecordError()
+				}
 				continue
+			}
+
+			// 记录拉取统计（1条消息）
+			if c.metrics != nil {
+				c.metrics.RecordFetch(1, fetchDuration)
 			}
 
 			// 创建消息上下文
@@ -139,6 +199,7 @@ func (c *Consumer) Close() {
 
 // processMessage 带重试的消息处理
 func (c *Consumer) processMessage(ctx context.Context, msgCtx *MessageContext, handler TopicHandler) {
+	processStart := time.Now()
 
 	// 创建带超时的上下文
 	processCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -146,17 +207,32 @@ func (c *Consumer) processMessage(ctx context.Context, msgCtx *MessageContext, h
 	err := handler(processCtx, msgCtx.Message.Topic, msgCtx.Message)
 	cancel()
 
+	processDuration := time.Since(processStart)
+
+	// 记录处理耗时
+	if c.metrics != nil {
+		c.metrics.RecordProcessTime(processDuration)
+	}
+
 	if err != nil {
-		c.log.Errorf("消息处理失败: topic=%s, partition=%d, offset=%d, last_err=%v", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, err)
+		c.log.Errorf("消息处理失败: topic=%s, partition=%d, offset=%d, duration=%v, last_err=%v",
+			msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, processDuration, err)
+		// 记录错误
+		if c.metrics != nil {
+			c.metrics.RecordError()
+		}
+		return
 	}
 
 	// 处理成功，提交offset
 	if msgCtx.ShouldAck {
 		if commitErr := c.commitMessage(msgCtx.Message); commitErr != nil {
-			c.log.Errorf("提交offset失败: topic=%s, partition=%d, offset=%d, err=%v", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, commitErr)
+			c.log.Errorf("提交offset失败: topic=%s, partition=%d, offset=%d, err=%v",
+				msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, commitErr)
 			return
 		}
-		c.log.Debugf("消息处理成功并已确认: topic=%s, partition=%d, offset=%d", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset)
+		c.log.Debugf("消息处理成功并已确认: topic=%s, partition=%d, offset=%d, duration=%v",
+			msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, processDuration)
 	}
 }
 
@@ -206,6 +282,26 @@ func (c *Consumer) getRetryBackoff(attempt int) time.Duration {
 // GetReader 获取底层的kafka.Reader（用于高级操作）
 func (c *Consumer) GetReader() *kafka.Reader {
 	return c.reader
+}
+
+// GetMetrics 获取性能指标收集器
+func (c *Consumer) GetMetrics() *ConsumerMetrics {
+	return c.metrics
+}
+
+// PrintStats 打印统计信息
+func (c *Consumer) PrintStats() {
+	if c.metrics != nil {
+		fmt.Println(c.metrics.FormatStats())
+	}
+}
+
+// ResetStats 重置统计数据
+func (c *Consumer) ResetStats() {
+	if c.metrics != nil {
+		c.metrics.Reset()
+		c.log.Info("统计数据已重置")
+	}
 }
 
 // getStartOffset 获取起始offset

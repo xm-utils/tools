@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
 )
 
@@ -70,7 +69,7 @@ func (m *ConsumerManager) RegisterConsumer(business string, config *ConsumerConf
 	m.applyDefaults(config)
 
 	// 创建消费者实例
-	consumer, err := m.createConsumer(config)
+	consumer, err := NewConsumer(config)
 	if err != nil {
 		return fmt.Errorf("failed to create consumer for business '%s': %w", business, err)
 	}
@@ -296,47 +295,6 @@ func (m *ConsumerManager) applyDefaults(config *ConsumerConfig) {
 		config.ReadLagInterval = defaults.ReadLagInterval
 	}
 	// AutoCommit 保持原值，不覆盖
-}
-
-// createConsumer 创建消费者实例
-func (m *ConsumerManager) createConsumer(config *ConsumerConfig) (*Consumer, error) {
-	log := logrus.WithField("module", "Kafka Consumer")
-
-	// 构建 ReaderConfig
-	readerConfig := kafka.ReaderConfig{
-		Brokers:           config.Brokers,
-		GroupID:           config.GroupID,
-		MinBytes:          config.MinBytes,
-		MaxBytes:          config.MaxBytes,
-		MaxWait:           config.MaxWait,
-		ReadLagInterval:   config.ReadLagInterval,
-		HeartbeatInterval: config.HeartbeatInterval,
-		SessionTimeout:    config.SessionTimeout,
-		RebalanceTimeout:  config.RebalanceTimeout,
-		StartOffset:       getStartOffset(config.StartOffset),
-		ReadBackoffMin:    config.ReadBackoffMin,
-		ReadBackoffMax:    config.ReadBackoffMax,
-		CommitInterval:    config.CommitInterval,
-	}
-
-	// 根据配置选择单主题或多主题模式
-	if len(config.Topics) > 0 {
-		readerConfig.GroupTopics = config.Topics
-		log.Infof("Kafka消费者初始化成功（多主题模式）: brokers=%v, topics=%v, group=%s",
-			config.Brokers, config.Topics, config.GroupID)
-	} else {
-		readerConfig.Topic = config.Topic
-		log.Infof("Kafka消费者初始化成功（单主题模式）: brokers=%v, topic=%s, group=%s",
-			config.Brokers, config.Topic, config.GroupID)
-	}
-
-	reader := kafka.NewReader(readerConfig)
-
-	return &Consumer{
-		reader: reader,
-		log:    log,
-		config: config,
-	}, nil
 }
 
 // ConsumerHealth 消费者健康状态

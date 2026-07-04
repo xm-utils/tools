@@ -32,6 +32,21 @@ func (s *GormPersistenceStore) Save(ctx context.Context, record *QueueMsgRecord)
 	return s.db.WithContext(ctx).Table(s.tableName).Create(record).Error
 }
 
+// BatchSave 批量保存死信消息记录
+func (s *GormPersistenceStore) BatchSave(ctx context.Context, records []*QueueMsgRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	now := time.Now()
+	for _, record := range records {
+		record.CreatedTime = now
+		record.UpdatedTime = now
+	}
+
+	return s.db.WithContext(ctx).Table(s.tableName).CreateInBatches(records, 100).Error
+}
+
 // UpdateStatus 更新消息状态
 func (s *GormPersistenceStore) UpdateStatus(ctx context.Context, queueKey, messageID string, status QueueStatus, processedTime *time.Time) error {
 	updates := map[string]interface{}{

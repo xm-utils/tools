@@ -23,12 +23,9 @@ type QueueMsgRecord struct {
 	MessageID     string      `json:"messageId" comment:"消息唯一ID"`
 	MessageData   string      `json:"messageData" comment:"消息内容(JSON格式)"`
 	ErrorMessage  string      `json:"errorMessage" comment:"失败原因"`
-	RetryCount    int         `json:"retryCount" comment:"重试次数"`
-	MaxRetry      int         `json:"maxRetry" comment:"最大重试次数"`
 	Status        QueueStatus `json:"status" comment:"状态: 1-待处理, 2-处理中, 3-已处理, 4-已放弃"`
 	Operator      string      `json:"operator" comment:"操作人"`
 	OperatorId    uint64      `json:"operatorId" comment:"操作人ID"`
-	NextRetryTime *time.Time  `json:"nextRetryTime" comment:"下次重试时间"`
 	LastErrorTime *time.Time  `json:"lastErrorTime" comment:"最后错误时间"`
 	ProcessedTime *time.Time  `json:"processedTime" comment:"处理完成时间"`
 	CreatedTime   time.Time   `json:"createdTime" comment:"创建时间"`
@@ -40,8 +37,6 @@ type DLQMessage struct {
 	MessageID    string `json:"messageId"`
 	MessageData  string `json:"messageData"`
 	ErrorMessage string `json:"errorMessage"`
-	RetryCount   int    `json:"retryCount"`
-	MaxRetry     int    `json:"maxRetry"`
 	Timestamp    int64  `json:"timestamp"`
 }
 

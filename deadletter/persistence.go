@@ -11,11 +11,11 @@ type PersistenceStore interface {
 	// Save 保存死信消息记录
 	Save(ctx context.Context, record *QueueMsgRecord) error
 
+	// BatchSave 批量保存死信消息记录
+	BatchSave(ctx context.Context, records []*QueueMsgRecord) error
+
 	// UpdateStatus 更新消息状态
 	UpdateStatus(ctx context.Context, queueKey, messageID string, status QueueStatus, processedTime *time.Time) error
-
-	// UpdateRetryInfo 更新重试信息
-	UpdateRetryInfo(ctx context.Context, queueKey, messageID string, retryCount int, errorMessage string, lastErrorTime, nextRetryTime time.Time) error
 
 	// FindByMessageID 根据消息ID查询记录
 	FindByMessageID(ctx context.Context, queueKey, messageID string) (*QueueMsgRecord, error)

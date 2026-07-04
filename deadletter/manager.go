@@ -42,17 +42,15 @@ func NewQueueManager(config *Config, handler MessageHandler, store PersistenceSt
 	}
 }
 
-// PushToDeadLetter 将消息推入死信队列(Redis List + Stream双写)
+// PushToDeadLetter 将消息推入死信队列(仅写入Redis List)
 func (m *QueueManager) PushToDeadLetter(messageID string, messageData string, errorMessage string, retryCount int) error {
 	now := time.Now()
 
-	// 1. 写入Redis List(用于快速恢复)
+	// 写入Redis List(用于快速恢复)
 	dlqMessage := &DLQMessage{
 		MessageID:    messageID,
 		MessageData:  messageData,
 		ErrorMessage: errorMessage,
-		RetryCount:   retryCount,
-		MaxRetry:     m.config.MaxRetry,
 		Timestamp:    now.UnixMilli(),
 	}
 
@@ -66,26 +64,6 @@ func (m *QueueManager) PushToDeadLetter(messageID string, messageData string, er
 	if err := redis.LPush(m.ctx, m.config.DeadLetterStream, string(payload)); err != nil {
 		m.log.Errorf("推入Redis死信队列失败: messageID=%s, err=%v", messageID, err)
 		return err
-	}
-
-	// 2. 持久化到存储
-	dlqRecord := &QueueMsgRecord{
-		QueueKey:      m.config.QueueKey,
-		MessageID:     messageID,
-		MessageData:   messageData,
-		ErrorMessage:  errorMessage,
-		RetryCount:    retryCount,
-		MaxRetry:      m.config.MaxRetry,
-		Status:        DLQStatusPending,
-		NextRetryTime: &now,
-		LastErrorTime: &now,
-	}
-
-	if m.store != nil {
-		if err := m.store.Save(m.ctx, dlqRecord); err != nil {
-			m.log.Errorf("持久化死信消息失败: messageID=%s, err=%v", messageID, err)
-			// 持久化失败不影响Redis操作,仅记录日志
-		}
 	}
 
 	m.metrics.RecordDeadLetter()
@@ -114,111 +92,119 @@ func (m *QueueManager) StartRecovery() {
 	}()
 }
 
-// recoverAndRetry 从死信队列恢复消息并重试1次
+// recoverAndRetry 从死信队列恢复消息并执行(仅执行一次,不重试)
 func (m *QueueManager) recoverAndRetry() {
 	m.log.Info("开始执行死信消息恢复...")
 
-	// 从Redis List中批量获取消息
-	messages, err := redis.LRange[string](m.ctx, m.config.DeadLetterStream, 0, int64(m.config.BatchSize-1))
-	if err != nil || len(messages) == 0 {
+	// 先获取队列总长度
+	queueLen, err := m.GetQueueLength()
+	if err != nil {
+		m.log.Errorf("获取队列长度失败: err=%v", err)
+		return
+	}
+
+	if queueLen == 0 {
+		m.log.Info("死信队列为空,无需处理")
+		return
+	}
+
+	m.log.Infof("死信队列中共有 %d 条消息,将按批次处理(每批 %d 条)", queueLen, m.config.BatchSize)
+
+	totalProcessed := 0
+	totalFailed := 0
+	batchCount := 0
+
+	// 循环处理直到队列为空
+	for {
+		// 从Redis List中批量获取消息
+		messages, err := redis.LRange[string](m.ctx, m.config.DeadLetterStream, 0, int64(m.config.BatchSize-1))
+		if err != nil || len(messages) == 0 {
+			if err != nil {
+				m.log.Errorf("从Redis读取死信消息失败: err=%v", err)
+			}
+			break
+		}
+
+		batchCount++
+		m.log.Infof("开始处理第 %d 批次,本批次消息数: %d", batchCount, len(messages))
+
+		var failedRecords []*QueueMsgRecord
+		batchProcessed := 0
+		batchFailed := 0
+
+		for _, msgStr := range messages {
+			var dlqMsg DLQMessage
+			if err := json.Unmarshal([]byte(msgStr), &dlqMsg); err != nil {
+				m.log.Errorf("解析死信消息失败: err=%v", err)
+				// 移除无效消息
+				redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
+				continue
+			}
+
+			// 执行消息处理(仅执行一次,不重试)
+			m.log.Debugf("处理死信消息: messageID=%s", dlqMsg.MessageID)
+
+			err := m.handler(m.ctx, dlqMsg.MessageData)
+
+			// 无论成功与否,都从Redis List中移除
+			redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
+
+			if err != nil {
+				// 执行失败,收集到批量记录中
+				m.log.Warnf("死信消息处理失败,将批量保存: messageID=%s, err=%v", dlqMsg.MessageID, err)
+				now := time.Now()
+				failedRecords = append(failedRecords, &QueueMsgRecord{
+					QueueKey:      m.config.QueueKey,
+					MessageID:     dlqMsg.MessageID,
+					MessageData:   dlqMsg.MessageData,
+					ErrorMessage:  err.Error(),
+					Status:        DLQStatusAbandoned,
+					Operator:      "system",
+					OperatorId:    0,
+					LastErrorTime: &now,
+					ProcessedTime: &now,
+				})
+				batchFailed++
+			} else {
+				// 执行成功
+				m.log.Debugf("死信消息处理成功: messageID=%s", dlqMsg.MessageID)
+				batchProcessed++
+				m.metrics.RecordRecovery()
+			}
+		}
+
+		// 批量保存本批次失败的消息
+		if len(failedRecords) > 0 && m.store != nil {
+			if err := m.store.BatchSave(m.ctx, failedRecords); err != nil {
+				m.log.Errorf("批量保存失败消息失败: batch=%d, count=%d, err=%v", batchCount, len(failedRecords), err)
+			} else {
+				m.log.Infof("批量保存失败消息成功: batch=%d, count=%d", batchCount, len(failedRecords))
+			}
+		} else if len(failedRecords) > 0 && m.store == nil {
+			m.log.Warnf("未配置持久化存储,%d条失败消息将被丢弃", len(failedRecords))
+		}
+
+		totalProcessed += batchProcessed
+		totalFailed += batchFailed
+
+		m.log.Infof("第 %d 批次处理完成: 成功=%d, 失败=%d", batchCount, batchProcessed, batchFailed)
+
+		// 检查是否还有剩余消息
+		remainingLen, err := m.GetQueueLength()
 		if err != nil {
-			m.log.Errorf("从Redis读取死信消息失败: err=%v", err)
-		}
-		return
-	}
-
-	recovered := 0
-	failed := 0
-
-	for _, msgStr := range messages {
-		var dlqMsg DLQMessage
-		if err := json.Unmarshal([]byte(msgStr), &dlqMsg); err != nil {
-			m.log.Errorf("解析死信消息失败: err=%v", err)
-			// 移除无效消息
-			redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
-			continue
+			m.log.Warnf("获取剩余队列长度失败: err=%v", err)
+			break
 		}
 
-		// 检查是否超过最大重试次数
-		if dlqMsg.RetryCount >= dlqMsg.MaxRetry {
-			m.log.Warnf("消息超过最大重试次数,标记为放弃: messageID=%s", dlqMsg.MessageID)
-			m.markAsAbandoned(&dlqMsg)
-			redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
-			failed++
-			continue
+		if remainingLen == 0 {
+			m.log.Infof("所有批次处理完成,队列已清空")
+			break
 		}
 
-		// 执行重试(仅重试1次)
-		m.log.Infof("重试死信消息: messageID=%s, retryCount=%d", dlqMsg.MessageID, dlqMsg.RetryCount+1)
-
-		err := m.handler(m.ctx, dlqMsg.MessageData)
-		if err != nil {
-			m.log.Errorf("死信消息重试失败: messageID=%s, err=%v", dlqMsg.MessageID, err)
-			// 更新重试计数并重新推入队列尾部
-			dlqMsg.RetryCount++
-			updatedPayload, _ := json.Marshal(dlqMsg)
-			redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
-			redis.RPush(m.ctx, m.config.DeadLetterStream, string(updatedPayload))
-
-			// 更新存储
-			m.updateRetryCount(dlqMsg.MessageID, dlqMsg.RetryCount, err.Error())
-			failed++
-		} else {
-			m.log.Infof("死信消息重试成功: messageID=%s", dlqMsg.MessageID)
-			// 从队列中移除
-			redis.LRem(m.ctx, m.config.DeadLetterStream, 1, msgStr)
-			// 标记为已处理
-			m.markAsProcessed(&dlqMsg)
-			recovered++
-			m.metrics.RecordRecovery()
-		}
+		m.log.Infof("剩余消息数: %d,继续处理下一批次...", remainingLen)
 	}
 
-	m.log.Infof("死信恢复完成: 成功=%d, 失败=%d, 总数=%d", recovered, failed, len(messages))
-}
-
-// markAsProcessed 标记消息为已处理
-func (m *QueueManager) markAsProcessed(msg *DLQMessage) {
-	if m.store == nil {
-		return
-	}
-
-	now := time.Now()
-	err := m.store.UpdateStatus(m.ctx, m.config.QueueKey, msg.MessageID, DLQStatusProcessed, &now)
-
-	if err != nil {
-		m.log.Errorf("更新消息状态为已处理失败: messageID=%s, err=%v", msg.MessageID, err)
-	}
-}
-
-// markAsAbandoned 标记消息为已放弃
-func (m *QueueManager) markAsAbandoned(msg *DLQMessage) {
-	if m.store == nil {
-		return
-	}
-
-	now := time.Now()
-	err := m.store.UpdateStatus(m.ctx, m.config.QueueKey, msg.MessageID, DLQStatusAbandoned, &now)
-
-	if err != nil {
-		m.log.Errorf("更新消息状态为已放弃失败: messageID=%s, err=%v", msg.MessageID, err)
-	}
-}
-
-// updateRetryCount 更新重试计数
-func (m *QueueManager) updateRetryCount(messageID string, retryCount int, errorMessage string) {
-	if m.store == nil {
-		return
-	}
-
-	now := time.Now()
-	nextRetry := now.Add(m.config.RetryInterval)
-
-	err := m.store.UpdateRetryInfo(m.ctx, m.config.QueueKey, messageID, retryCount, errorMessage, now, nextRetry)
-
-	if err != nil {
-		m.log.Errorf("更新重试计数失败: messageID=%s, err=%v", messageID, err)
-	}
+	m.log.Infof("死信恢复全部完成: 总成功=%d, 总失败=%d, 总批次=%d", totalProcessed, totalFailed, batchCount)
 }
 
 // GetQueueLength 获取队列长度

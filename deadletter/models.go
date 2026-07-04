@@ -1,6 +1,8 @@
 package deadletter
 
 import (
+	"context"
+	"fmt"
 	"time"
 )
 
@@ -31,4 +33,39 @@ type QueueMsgRecord struct {
 	ProcessedTime *time.Time  `json:"processedTime" comment:"处理完成时间"`
 	CreatedTime   time.Time   `json:"createdTime" comment:"创建时间"`
 	UpdatedTime   time.Time   `json:"updatedTime" comment:"更新时间"`
+}
+
+// DLQMessage 死信队列消息结构
+type DLQMessage struct {
+	MessageID    string `json:"messageId"`
+	MessageData  string `json:"messageData"`
+	ErrorMessage string `json:"errorMessage"`
+	RetryCount   int    `json:"retryCount"`
+	MaxRetry     int    `json:"maxRetry"`
+	Timestamp    int64  `json:"timestamp"`
+}
+
+// MessageHandler 消息处理器接口
+type MessageHandler func(ctx context.Context, messageData string) error
+
+// Config 死信队列配置
+type Config struct {
+	QueueKey         string        // Redis队列Key(支持自定义)
+	DeadLetterStream string        // 死信Stream Key
+	MaxRetry         int           // 最大重试次数(默认3次)
+	RetryInterval    time.Duration // 重试间隔(默认1秒)
+	RecoveryInterval time.Duration // 恢复检查间隔(默认5分钟)
+	BatchSize        int           // 批量处理大小(默认10)
+}
+
+// DefaultConfig 返回默认配置
+func DefaultConfig(queueKey string) *Config {
+	return &Config{
+		QueueKey:         queueKey,
+		DeadLetterStream: fmt.Sprintf("dead_letter:%s", queueKey),
+		MaxRetry:         3,
+		RetryInterval:    1 * time.Second,
+		RecoveryInterval: 5 * time.Minute,
+		BatchSize:        10,
+	}
 }

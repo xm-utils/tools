@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Kafka SDK](https://img.shields.io/badge/kafka--go-v0.4.51-blue.svg)](https://github.com/segmentio/kafka-go)
 
-一个基于 [segmentio/kafka-go](https://github.com/segmentio/kafka-go) 封装的高性能 Go 语言 Kafka 客户端工具库，提供简洁易用的消息生产和消费功能，支持单主题/多主题模式、消息去重、批量处理等高级特性。
+一个基于 [segmentio/kafka-go](https://github.com/segmentio/kafka-go) 封装的高性能 Go 语言 Kafka 客户端工具库，提供简洁易用的消息生产和消费功能，支持消费者管理器、单主题/多主题模式、消息去重、批量处理等高级特性。
 
 ## 📋 目录
 
@@ -18,37 +18,27 @@
   - [消息生产](#消息生产)
   - [消息消费](#消息消费)
   - [消息确认机制](#消息确认机制)
-    - [手动提交模式](#1-手动提交模式推荐)
-    - [自动提交模式](#2-自动提交模式)
-    - [消息重试机制](#3-消息重试机制)
-    - [自定义确认逻辑](#4-自定义确认逻辑)
   - [单主题模式](#单主题模式)
   - [多主题模式](#多主题模式)
+- [消费者管理器](#消费者管理器) 
+  - [为什么需要消费者管理器](#为什么需要消费者管理器)
+  - [快速开始](#快速开始-1)
+  - [使用模式](#使用模式)
+  - [健康检查与监控](#健康检查与监控)
+  - [动态管理消费者](#动态管理消费者)
+  - [API 参考](#api-参考-1)
+  - [最佳实践](#最佳实践-1)
+  - [常见问题](#常见问题-1)
 - [高级功能](#高级功能)
   - [消息去重](#消息去重)
   - [内存去重存储](#内存去重存储)
   - [Redis 去重存储](#redis-去重存储)
-  - [自定义去重处理器](#自定义去重处理器)
 - [配置说明](#配置说明)
-  - [Config 配置结构](#config-配置结构)
+  - [ProducerConfig 生产者配置](#producerconfig-生产者配置)
+  - [ConsumerConfig 消费者配置](#consumerconfig-消费者配置)
   - [配置参数详解](#配置参数详解)
 - [使用示例](#使用示例)
-  - [基础生产者示例](#基础生产者示例)
-  - [基础消费者示例](#基础消费者示例)
-  - [多主题消费者示例](#多主题消费者示例)
-  - [带去重的消费者示例](#带去重的消费者示例)
-  - [完整的微服务示例](#完整的微服务示例)
-- [API 参考](#api-参考)
-  - [生产者 API](#生产者-api)
-  - [消费者 API](#消费者-api)
-  - [去重 API](#去重-api)
-  - [数据结构](#数据结构)
 - [最佳实践](#最佳实践)
-  - [生产环境配置建议](#生产环境配置建议)
-  - [消息可靠性保证](#消息可靠性保证)
-  - [性能优化建议](#性能优化建议)
-  - [去重策略选择](#去重策略选择)
-  - [消息确认最佳实践](#消息确认最佳实践)
 - [常见问题](#常见问题)
 - [依赖](#依赖)
 - [许可证](#许可证)
@@ -59,6 +49,7 @@
 
 - **消息生产**：支持单条消息发布、批量消息发布、自动重试
 - **消息消费**：支持单主题/多主题订阅、异步消息处理、优雅退出
+- **消费者管理器**：支持多业务消费者实例统一管理，提供更好的隔离性和灵活性 
 - **消息确认**：支持手动/自动提交 offset、内置重试机制、指数退避策略
 - **消息去重**：支持基于内存或 Redis 的消息去重，防止重复处理
 - **灵活配置**：支持丰富的配置选项，满足不同场景需求
@@ -66,12 +57,12 @@
 ## ✨ 主要特性
 
 - ✅ **简洁的 API**：封装复杂的 kafka-go SDK，提供简单易用的接口
+- ✅ **消费者管理器**：支持多业务消费者实例统一管理，隔离性更好 
 - ✅ **单/多主题支持**：灵活支持单主题和多主题消费模式
-- ✅ **消息确认**：支持手动/自动提交 offset，保证消息可靠性 ⭐ NEW
-- ✅ **消息重试**：内置指数退避重试机制，自动处理临时故障 ⭐ NEW
+- ✅ **消息确认**：支持手动/自动提交 offset，保证消息可靠性
+- ✅ **消息重试**：内置指数退避重试机制，自动处理临时故障
 - ✅ **消息去重**：内置消息去重机制，支持内存和 Redis 两种存储方式
 - ✅ **批量处理**：支持批量消息发送，提高吞吐量
-- ✅ **自动重试**：内置重试机制，提高消息投递成功率
 - ✅ **异步处理**：消费者采用异步处理方式，提高并发能力
 - ✅ **优雅退出**：支持 context 控制的优雅关闭
 - ✅ **日志集成**：集成 logrus，提供详细的运行日志
@@ -112,11 +103,19 @@ import (
 
 func main() {
     // 创建配置
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "my-topic",
+    config := &kafka.ProducerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers: []string{"localhost:9092"},
+        },
+        Topic: "my-topic",
     }
 
+    // 应用默认值
+    defaults := kafka.GetProducerDefaults()
+    if config.MaxAttempts == 0 {
+        config.MaxAttempts = defaults.MaxAttempts
+    }
+    
     // 初始化生产者
     if err := kafka.InitProducer(config); err != nil {
         log.Fatalf("Failed to init producer: %v", err)
@@ -137,7 +136,7 @@ func main() {
 }
 ```
 
-#### 消费者初始化
+#### 消费者初始化（传统方式）
 
 ```go
 package main
@@ -154,8 +153,10 @@ import (
 
 func main() {
     // 创建配置
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
+    config := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers: []string{"localhost:9092"},
+        },
         Topic:   "my-topic",
         GroupID: "my-consumer-group",
     }
@@ -203,37 +204,20 @@ func main() {
 brokers:
   - "localhost:9092"
   - "localhost:9093"
-  - "localhost:9094"
-
-# 单主题模式
-topic: "my-topic"
-
-# 多主题模式（与 topic 二选一）
-# topics:
-#   - "topic-1"
-#   - "topic-2"
-#   - "topic-3"
-
-group_id: "my-consumer-group"
-client_id: "my-app"
-
-# 生产者和消费者通用配置
-max_attempts: 10
-dial_timeout: 10s
-read_timeout: 10s
-write_timeout: 10s
 
 # 生产者配置
+topic: "my-topic"
+max_attempts: 10
 batch_size: 1000
 batch_bytes: 1048576  # 1MB
 
 # 消费者配置
+group_id: "my-consumer-group"
 min_bytes: 1
 max_bytes: 1048576  # 1MB
-queue_capacity: 1000
 ```
 
-2. 在代码中加载配置（需配合配置加载库如 viper）：
+2. 在代码中加载配置：
 
 ```go
 package main
@@ -251,19 +235,15 @@ func main() {
         log.Fatalf("Failed to read config: %v", err)
     }
 
-    // 解析为 kafka.Config 结构
-    var config kafka.Config
+    // 解析为 kafka.ProducerConfig 结构
+    var config kafka.ProducerConfig
     if err := viper.Unmarshal(&config); err != nil {
         log.Fatalf("Failed to unmarshal config: %v", err)
     }
 
-    // 初始化生产者和消费者
+    // 初始化生产者
     if err := kafka.InitProducer(&config); err != nil {
         log.Fatalf("Failed to init producer: %v", err)
-    }
-
-    if err := kafka.InitConsumer(&config); err != nil {
-        log.Fatalf("Failed to init consumer: %v", err)
     }
 
     log.Println("Kafka client initialized successfully")
@@ -280,25 +260,6 @@ func main() {
 // 使用默认生产者
 ctx := context.Background()
 err := kafka.Publish(ctx, "my-topic", "order-123", []byte(`{"order_id":123}`))
-if err != nil {
-    log.Printf("Publish failed: %v", err)
-}
-```
-
-#### 使用生产者实例发布
-
-```go
-producer := kafka.GetProducer()
-
-// 发布 JSON 消息
-message := map[string]interface{}{
-    "user_id":   1001,
-    "action":    "login",
-    "timestamp": time.Now().Unix(),
-}
-
-jsonData, _ := json.Marshal(message)
-err := producer.Publish(ctx, "user-events", "user-1001", jsonData)
 if err != nil {
     log.Printf("Publish failed: %v", err)
 }
@@ -322,19 +283,11 @@ messages := []kafka.Message{
         Value: []byte(`{"order_id":2,"amount":200}`),
         Time:  time.Now(),
     },
-    {
-        Topic: "orders",
-        Key:   []byte("order-3"),
-        Value: []byte(`{"order_id":3,"amount":300}`),
-        Time:  time.Now(),
-    },
 }
 
 err := producer.PublishBatch(ctx, messages)
 if err != nil {
     log.Printf("Batch publish failed: %v", err)
-} else {
-    fmt.Printf("Successfully published %d messages\n", len(messages))
 }
 ```
 
@@ -348,10 +301,6 @@ consumer := kafka.GetConsumer()
 handler := func(ctx context.Context, topic string, msg kafka.Message) error {
     log.Printf("Received: topic=%s, key=%s, value=%s", 
         topic, string(msg.Key), string(msg.Value))
-    
-    // 处理业务逻辑
-    // ...
-    
     return nil
 }
 
@@ -361,401 +310,58 @@ if err := consumer.Subscribe(ctx, handler); err != nil {
 }
 ```
 
-#### 异步消息处理
+### 消息确认机制
 
-消费者内部已经实现了异步处理，每个消息会在独立的 goroutine 中处理：
+Kafka 消费者支持完整的消息确认功能，包括手动/自动提交 offset、内置重试机制和指数退避策略。
+
+#### 手动提交模式（推荐）
 
 ```go
+config := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"localhost:9092"},
+    },
+    Topic:      "orders",
+    GroupID:    "order-processor",
+    AutoCommit: false,  // 手动提交
+    MaxRetries: 3,
+}
+
 handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 模拟耗时处理
-    time.Sleep(100 * time.Millisecond)
-    
     // 处理业务逻辑
-    processOrder(msg.Value)
-    
-    return nil
-}
-```
-
-### 消息确认机制 ⭐ NEW
-
-Kafka 消费者支持完整的消息确认（Message Acknowledgment）功能，包括手动/自动提交 offset、内置重试机制和指数退避策略。
-
-#### MessageContext 消息上下文
-
-新增 `MessageContext` 结构，封装消息和确认信息：
-
-```go
-type MessageContext struct {
-    Message   kafka.Message
-    Commit    func() error   // 提交offset（确认消息）
-    Retry     int            // 当前重试次数
-    MaxRetry  int            // 最大重试次数
-    ShouldAck bool           // 是否应该确认
-}
-```
-
-#### 1. 手动提交模式（推荐）
-
-手动提交模式下，只有当消息处理成功后才会提交 offset，确保消息不丢失：
-
-**配置示例：**
-```go
-config := &kafka.Config{
-    Brokers:    []string{"localhost:9092"},
-    Topic:      "orders",
-    GroupID:    "order-processor",
-    AutoCommit: false,  // 手动提交（推荐）
-    MaxRetries: 3,      // 最大重试3次
-}
-
-kafka.InitConsumer(config)
-consumer := kafka.GetConsumer()
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    var order Order
-    if err := json.Unmarshal(msg.Value, &order); err != nil {
-        return err // 返回错误会触发重试
+    if err := processOrder(msg.Value); err != nil {
+        return err  // 返回错误会触发重试
     }
-    
-    // 处理订单
-    if err := processOrder(order); err != nil {
-        return err // 返回错误会触发重试
-    }
-    
-    // handler 返回 nil 后，消费者会自动提交 offset
-    return nil
+    return nil  // 返回 nil 表示成功，自动提交 offset
 }
-
-consumer.Subscribe(ctx, handler)
 ```
 
-**工作流程：**
-```
-1. 读取消息
-   ↓
-2. 创建 MessageContext
-   ↓
-3. 异步处理消息 (goroutine)
-   ↓
-4. 执行 handler
-   ├─ 成功 → 提交 offset → 完成
-   └─ 失败 → 重试
-       ├─ 未达最大重试 → 等待(指数退避) → 重试
-       └─ 达到最大重试 → 记录错误 → 提交 offset (跳过)
-```
+#### 自动提交模式
 
-**优点：**
-- ✅ 保证消息至少被处理一次（At-Least-Once）
-- ✅ 失败的消息可以自动重试
-- ✅ 避免消息丢失
-- ✅ 内置指数退避策略，防止雪崩效应
-
-**适用场景：**
-- 订单处理
-- 支付通知
-- 金融交易
-- 任何不能丢失消息的关键业务
-
-#### 2. 自动提交模式
-
-自动提交模式下，offset 会定期自动提交，不管消息是否处理成功：
-
-**配置示例：**
 ```go
-config := &kafka.Config{
-    Brokers:        []string{"localhost:9092"},
+config := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"localhost:9092"},
+    },
     Topic:          "logs",
-    GroupID:        "log-consumer",
-    AutoCommit:     true,           // 自动提交
-    CommitInterval: 5 * time.Second, // 每5秒提交一次
-}
-
-kafka.InitConsumer(config)
-consumer := kafka.GetConsumer()
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 处理日志
-    log.Printf("Log: %s", string(msg.Value))
-    return nil
-}
-
-consumer.Subscribe(ctx, handler)
-```
-
-**工作流程：**
-```
-1. 读取消息
-   ↓
-2. 异步处理消息 (goroutine)
-   ↓
-3. 执行 handler
-   ↓
-4. 定期自动提交 offset (独立协程)
-```
-
-**优点：**
-- ✅ 性能更好，无需等待提交
-- ✅ 实现简单
-
-**缺点：**
-- ❌ 可能导致消息丢失（提交后处理失败）
-- ❌ 可能重复处理（处理成功但未提交）
-
-**适用场景：**
-- 日志收集
-- 监控数据
-- 用户行为分析
-- 允许少量丢失的非关键业务
-
-#### 3. 消息重试机制
-
-消费者内置了指数退避重试机制，自动处理临时故障：
-
-**配置示例：**
-```go
-config := &kafka.Config{
-    Brokers:      []string{"localhost:9092"},
-    Topic:        "events",
-    GroupID:      "event-processor",
-    AutoCommit:   false,
-    MaxRetries:   5,              // 最多重试5次
-    RetryBackoff: 2 * time.Second, // 初始退避时间
-}
-
-kafka.InitConsumer(config)
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 如果返回错误，会自动重试
-    // 重试间隔：2s, 4s, 8s, 16s, 32s...
-    return processEvent(msg.Value)
-}
-```
-
-**重试策略（指数退避）：**
-- 第1次重试：等待 2 秒
-- 第2次重试：等待 4 秒
-- 第3次重试：等待 8 秒
-- 第4次重试：等待 16 秒
-- 第5次重试：等待 32 秒
-- 达到最大重试次数后：记录错误并跳过该消息
-
-**默认退避策略：**
-如果未配置 `RetryBackoff`，使用默认策略：1s, 2s, 4s, 8s, 16s, 32s, 60s, 60s...
-
-**最大退避时间：** 不超过 5 分钟
-
-#### 4. 自定义确认逻辑
-
-对于需要精细控制的场景，可以禁用自动重试，自行控制：
-
-```go
-config := &kafka.Config{
-    Brokers:    []string{"localhost:9092"},
-    Topic:      "critical-events",
-    GroupID:    "critical-processor",
-    AutoCommit: false,
-    MaxRetries: 0, // 禁用自动重试，自行控制
-}
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 自定义重试逻辑
-    maxAttempts := 5
-    for i := 0; i < maxAttempts; i++ {
-        if err := processCriticalEvent(msg.Value); err != nil {
-            log.Printf("Attempt %d failed: %v", i+1, err)
-            if i == maxAttempts-1 {
-                // 达到最大重试，发送到死信队列
-                sendToDeadLetterQueue(msg, err)
-                return nil // 返回 nil 以提交 offset，避免阻塞
-            }
-            time.Sleep(time.Duration(i+1) * time.Second)
-            continue
-        }
-        break
-    }
-    return nil
-}
-```
-
-#### 起始 Offset 配置
-
-支持从不同位置开始消费：
-
-```go
-config := &kafka.Config{
-    // 从最早的消息开始消费（默认）
-    StartOffset: kafka.FirstOffset, // -2
-    
-    // 或从最新的消息开始消费（忽略历史消息）
-    // StartOffset: kafka.LastOffset, // -1
-}
-```
-
-**建议：**
-- 新消费者组使用 `FirstOffset`，确保不遗漏消息
-- 已有消费者组可以使用 `LastOffset`，快速追上进度
-
-#### 消息确认机制 ⭐ NEW
-
-Kafka 消费者支持两种消息确认模式：**手动提交**（推荐）和**自动提交**。
-
-##### 1. 手动提交模式（推荐）
-
-手动提交模式下，只有当消息处理成功后才会提交 offset，确保消息不丢失：
-
-```go
-config := &kafka.Config{
-    Brokers:    []string{"localhost:9092"},
-    Topic:      "orders",
-    GroupID:    "order-processor",
-    AutoCommit: false,  // 手动提交（推荐）
-    MaxRetries: 3,      // 最大重试3次
-}
-
-kafka.InitConsumer(config)
-consumer := kafka.GetConsumer()
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    var order Order
-    if err := json.Unmarshal(msg.Value, &order); err != nil {
-        return err // 返回错误会触发重试
-    }
-    
-    // 处理订单
-    if err := processOrder(order); err != nil {
-        return err // 返回错误会触发重试
-    }
-    
-    // handler 返回 nil 后，消费者会自动提交 offset
-    return nil
-}
-
-consumer.Subscribe(ctx, handler)
-```
-
-**手动提交的优点：**
-- ✅ 保证消息至少被处理一次（At-Least-Once）
-- ✅ 失败的消息可以重试
-- ✅ 避免消息丢失
-
-##### 2. 自动提交模式
-
-自动提交模式下，offset 会定期自动提交，不管消息是否处理成功：
-
-```go
-config := &kafka.Config{
-    Brokers:        []string{"localhost:9092"},
-    Topic:          "logs",
-    GroupID:        "log-consumer",
-    AutoCommit:     true,           // 自动提交
-    CommitInterval: 5 * time.Second, // 每5秒提交一次
-}
-
-kafka.InitConsumer(config)
-consumer := kafka.GetConsumer()
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 处理日志
-    log.Printf("Log: %s", string(msg.Value))
-    return nil
-}
-
-consumer.Subscribe(ctx, handler)
-```
-
-**自动提交的优点：**
-- ✅ 性能更好，无需等待提交
-- ✅ 实现简单
-
-**缺点：**
-- ❌ 可能导致消息丢失（提交后处理失败）
-- ❌ 可能重复处理（处理成功但未提交）
-
-##### 3. 消息重试机制
-
-消费者内置了指数退避重试机制：
-
-```go
-config := &kafka.Config{
-    Brokers:      []string{"localhost:9092"},
-    Topic:        "events",
-    GroupID:      "event-processor",
-    AutoCommit:   false,
-    MaxRetries:   5,              // 最多重试5次
-    RetryBackoff: 2 * time.Second, // 初始退避时间
-}
-
-kafka.InitConsumer(config)
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 如果返回错误，会自动重试
-    // 重试间隔：2s, 4s, 8s, 16s, 32s...
-    return processEvent(msg.Value)
-}
-```
-
-**重试策略：**
-- 第1次重试：等待 2 秒
-- 第2次重试：等待 4 秒
-- 第3次重试：等待 8 秒
-- 第4次重试：等待 16 秒
-- 第5次重试：等待 32 秒
-- 达到最大重试次数后，记录错误并跳过该消息
-
-##### 4. 自定义确认逻辑
-
-对于需要精细控制的场景，可以使用 `MessageContext`：
-
-```go
-// 注意：当前版本中，handler 返回 nil 即表示确认
-// 如需完全手动控制，可以在配置中添加选项
-
-config := &kafka.Config{
-    Brokers:    []string{"localhost:9092"},
-    Topic:      "critical-events",
-    GroupID:    "critical-processor",
-    AutoCommit: false,
-    MaxRetries: 0, // 禁用自动重试，自行控制
-}
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 自定义重试逻辑
-    maxAttempts := 5
-    for i := 0; i < maxAttempts; i++ {
-        if err := processCriticalEvent(msg.Value); err != nil {
-            log.Printf("Attempt %d failed: %v", i+1, err)
-            if i == maxAttempts-1 {
-                // 达到最大重试，发送到死信队列
-                sendToDeadLetterQueue(msg)
-                return nil // 返回 nil 以提交 offset
-            }
-            time.Sleep(time.Duration(i+1) * time.Second)
-            continue
-        }
-        break
-    }
-    return nil
+    GroupID:        "log-collector",
+    AutoCommit:     true,   // 自动提交
+    CommitInterval: 5 * time.Second,  // 每5秒提交一次
 }
 ```
 
 ### 单主题模式
 
-单主题模式适用于只关注单一业务场景的消费者：
-
 ```go
-config := &kafka.Config{
-    Brokers: []string{"localhost:9092"},
-    Topic:   "user-events",  // 单个主题
+config := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"localhost:9092"},
+    },
+    Topic:   "user-events",
     GroupID: "user-event-processor",
 }
 
-if err := kafka.InitConsumer(config); err != nil {
-    log.Fatal(err)
-}
-
 handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 只需要处理 user-events 主题的消息
     log.Printf("User event: %s", string(msg.Value))
     return nil
 }
@@ -765,12 +371,12 @@ kafka.Subscribe(ctx, handler)
 
 ### 多主题模式
 
-多主题模式适用于需要同时监听多个相关主题的场景：
-
 ```go
-config := &kafka.Config{
-    Brokers: []string{"localhost:9092"},
-    Topics:  []string{
+config := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"localhost:9092"},
+    },
+    Topics: []string{
         "order-created",
         "order-updated",
         "order-cancelled",
@@ -778,199 +384,395 @@ config := &kafka.Config{
     GroupID: "order-processor",
 }
 
-if err := kafka.InitConsumer(config); err != nil {
-    log.Fatal(err)
-}
-
 // 根据主题进行不同的处理逻辑
 handler := func(ctx context.Context, topic string, msg kafka.Message) error {
     switch topic {
     case "order-created":
-        log.Printf("New order: %s", string(msg.Value))
         handleNewOrder(msg.Value)
-        
     case "order-updated":
-        log.Printf("Order updated: %s", string(msg.Value))
         handleOrderUpdate(msg.Value)
-        
     case "order-cancelled":
-        log.Printf("Order cancelled: %s", string(msg.Value))
         handleOrderCancel(msg.Value)
-        
-    default:
-        log.Printf("Unknown topic: %s", topic)
     }
-    
     return nil
 }
 
 kafka.Subscribe(ctx, handler)
 ```
 
-## 🚀 高级功能
+## 🎯 消费者管理器 (ConsumerManager)
+
+消费者管理器是 Kafka 工具库的核心功能之一，用于管理多个业务消费者实例，提供更好的隔离性、灵活性和可维护性。
+
+### 为什么需要消费者管理器
+
+在生产环境中，一个应用通常需要处理多个业务领域的消息。使用消费者管理器可以：
+
+**❌ 不使用管理器的问题：**
+- 所有业务共享同一个 Consumer Group，无法独立控制 offset
+- 不同业务的处理速度相互影响
+- 某个业务处理失败会影响其他业务
+- 无法针对不同业务设置不同的配置
+- 扩展性差，难以水平扩展特定业务
+
+**✅ 使用管理器的好处：**
+- ✅ **隔离性好**：每个业务有独立的 Consumer Group，offset 互不影响
+- ✅ **灵活配置**：不同业务可以有不同的配置（批量大小、超时、重试等）
+- ✅ **故障隔离**：某个业务的问题不会影响其他业务
+- ✅ **独立扩展**：可以针对高流量业务单独增加消费者实例
+- ✅ **独立监控**：可以分别监控每个业务的消费延迟、处理速度
+- ✅ **便于维护**：可以单独重启某个业务的消费者而不影响其他业务
+
+### 快速开始
+
+#### 1. 基础用法
+
+```go
+package main
+
+import (
+    "context"
+    "log"
+    "os"
+    "os/signal"
+    "syscall"
+    
+    "github.com/segmentio/kafka-go"
+    "github.com/xm-utils/tools/kafka"
+)
+
+func main() {
+    // 获取管理器实例（单例模式）
+    manager := kafka.GetConsumerManager()
+    
+    // 注册订单业务消费者
+    orderConfig := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers:  []string{"localhost:9092"},
+            ClientID: "order-service",
+        },
+        Topic:      "orders",
+        GroupID:    "order-service-group",
+        MaxRetries: 3,
+    }
+    
+    if err := manager.RegisterConsumer("order", orderConfig); err != nil {
+        log.Fatalf("注册订单消费者失败: %v", err)
+    }
+    
+    // 注册用户业务消费者
+    userConfig := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers:  []string{"localhost:9092"},
+            ClientID: "user-service",
+        },
+        Topic:      "users",
+        GroupID:    "user-service-group",
+        MaxRetries: 5,
+    }
+    
+    if err := manager.RegisterConsumer("user", userConfig); err != nil {
+        log.Fatalf("注册用户消费者失败: %v", err)
+    }
+    
+    // 定义各业务的消息处理器
+    handlers := map[string]kafka.TopicHandler{
+        "order": func(ctx context.Context, topic string, msg kafka.Message) error {
+            log.Printf("处理订单消息: key=%s, value=%s", 
+                string(msg.Key), string(msg.Value))
+            return nil
+        },
+        "user": func(ctx context.Context, topic string, msg kafka.Message) error {
+            log.Printf("处理用户消息: key=%s, value=%s", 
+                string(msg.Key), string(msg.Value))
+            return nil
+        },
+    }
+    
+    // 启动所有消费者
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    
+    go func() {
+        if err := manager.StartAll(ctx, handlers); err != nil {
+            log.Printf("消费者运行错误: %v", err)
+        }
+    }()
+    
+    log.Println("所有消费者已启动")
+    
+    // 等待关闭信号
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+    <-sigChan
+    
+    log.Println("收到关闭信号，正在优雅关闭...")
+    cancel()
+    manager.CloseAll()
+    log.Println("所有消费者已关闭")
+}
+```
+
+### 使用模式
+
+#### 微服务架构模式
+
+在微服务架构中，每个微服务独立管理自己的消费者：
+
+```go
+// order-service/main.go
+func main() {
+    manager := kafka.GetConsumerManager()
+    
+    config := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers:  []string{"kafka:9092"},
+            ClientID: "order-service",
+        },
+        Topics:     []string{"orders-created", "orders-updated"},
+        GroupID:    "order-service-group",
+        MaxRetries: 3,
+    }
+    
+    manager.RegisterConsumer("order", config)
+    
+    handlers := map[string]kafka.TopicHandler{
+        "order": OrderMessageHandler,
+    }
+    
+    ctx := context.Background()
+    manager.StartAll(ctx, handlers)
+}
+```
+
+**优势：**
+- ✅ 服务间完全隔离
+- ✅ 可以独立部署和扩展
+- ✅ 故障不会传播
+
+#### 单服务多业务模式
+
+在一个服务中处理多个业务领域的消息：
+
+```go
+func main() {
+    manager := kafka.GetConsumerManager()
+    
+    businesses := map[string]*kafka.ConsumerConfig{
+        "analytics": {
+            CommonConfig: kafka.CommonConfig{
+                Brokers: []string{"kafka:9092"},
+            },
+            Topic:      "user-events",
+            GroupID:    "analytics-group",
+            MaxRetries: 10,
+            MaxBytes:   2097152, // 2MB 批量处理
+        },
+        "realtime": {
+            CommonConfig: kafka.CommonConfig{
+                Brokers: []string{"kafka:9092"},
+            },
+            Topic:      "user-events",  // 同一主题，不同消费组
+            GroupID:    "realtime-group",
+            MaxRetries: 3,
+            MaxBytes:   1048576,        // 1MB 快速响应
+        },
+    }
+    
+    for business, config := range businesses {
+        manager.RegisterConsumer(business, config)
+    }
+    
+    handlers := map[string]kafka.TopicHandler{
+        "analytics": AnalyticsHandler,
+        "realtime":  RealtimeHandler,
+    }
+    
+    ctx := context.Background()
+    manager.StartAll(ctx, handlers)
+}
+```
+
+**优势：**
+- ✅ 同一数据源，不同处理策略
+- ✅ 资源利用率高
+- ✅ 便于统一管理
+
+### 健康检查与监控
+
+```go
+func MonitorConsumers() {
+    manager := kafka.GetConsumerManager()
+    
+    ticker := time.NewTicker(30 * time.Second)
+    defer ticker.Stop()
+    
+    for range ticker.C {
+        health := manager.HealthCheck()
+        
+        for _, status := range health {
+            log.Printf("业务: %s, 主题: %s, 消费组: %s, 状态: %s",
+                status.Business,
+                status.Topic,
+                status.GroupID,
+                status.Status,
+            )
+        }
+        
+        log.Printf("活跃消费者数量: %d", manager.GetConsumerCount())
+    }
+}
+```
+
+### API 参考
+
+#### ConsumerManager 主要方法
+
+| 方法 | 说明 | 参数 | 返回值 |
+|------|------|------|--------|
+| `GetConsumerManager()` | 获取默认管理器实例（单例） | 无 | `*ConsumerManager` |
+| `NewConsumerManager()` | 创建新的管理器实例 | 无 | `*ConsumerManager` |
+| `RegisterConsumer()` | 注册业务消费者 | business, config | `error` |
+| `GetConsumer()` | 获取指定业务的消费者 | business | `(*Consumer, error)` |
+| `StartAll()` | 启动所有消费者 | ctx, handlers | `error` |
+| `Start()` | 启动单个业务消费者 | ctx, business, handler | `error` |
+| `CloseAll()` | 关闭所有消费者 | 无 | 无 |
+| `Close()` | 关闭指定业务消费者 | business | `error` |
+| `ListConsumers()` | 列出所有消费者 | 无 | `map[string]*Consumer` |
+| `GetConsumerCount()` | 获取消费者数量 | 无 | `int` |
+| `HealthCheck()` | 健康检查 | 无 | `map[string]ConsumerHealth` |
+
+### 最佳实践
+
+#### 1. 配置建议
+
+```go
+// 高吞吐场景（日志收集、数据分析）
+highThroughputConfig := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"kafka:9092"},
+    },
+    Topic:      "logs",
+    GroupID:    "log-collector",
+    MaxBytes:   5242880,      // 5MB 大批量
+    MaxWait:    5 * time.Second,
+    MaxRetries: 3,
+}
+
+// 低延迟场景（实时通知、即时消息）
+lowLatencyConfig := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"kafka:9092"},
+    },
+    Topic:        "instant-messages",
+    GroupID:      "message-delivery",
+    MaxBytes:     104857,
+    MaxWait:      100 * time.Millisecond,
+    MaxRetries:   5,
+    RetryBackoff: 500 * time.Millisecond,
+}
+```
+
+#### 2. 优雅关闭
+
+```go
+func GracefulShutdown() {
+    manager := kafka.GetConsumerManager()
+    
+    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+    defer cancel()
+    
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+    
+    select {
+    case sig := <-sigChan:
+        log.Printf("收到信号: %v，开始优雅关闭", sig)
+        cancel()
+        time.Sleep(2 * time.Second)
+        manager.CloseAll()
+    case <-ctx.Done():
+        log.Println("超时，强制关闭")
+        manager.CloseAll()
+    }
+}
+```
+
+### 常见问题
+
+#### Q1: 什么时候使用单消费者，什么时候使用多消费者？
+
+**A:** 
+- **使用单消费者**：只有一个业务场景，或者所有消息的处理逻辑相同
+- **使用多消费者**：有多个业务场景，需要独立的 offset、配置或故障隔离
+
+#### Q2: 不同消费者可以订阅同一个主题吗？
+
+**A:** 可以！只要使用不同的 `GroupID`，它们就会独立消费。
+
+```go
+analyticsConfig.GroupID = "analytics-group"     // 用于数据分析
+realtimeConfig.GroupID = "realtime-group"       // 用于实时推送
+```
+
+#### Q3: 如何保证消息顺序？
+
+**A:** Kafka 只保证**分区内**的顺序。如果需要严格顺序：
+1. 使用相同的 key 将相关消息发送到同一分区
+2. 消费者单线程处理该分区
+
+### 总结对比
+
+| 特性 | 单消费者 | 多消费者（管理器） |
+|------|---------|------------------|
+| 隔离性 | ❌ 差 | ✅ 好 |
+| 灵活性 | ❌ 低 | ✅ 高 |
+| 可扩展性 | ❌ 差 | ✅ 好 |
+| 管理复杂度 | ✅ 简单 | ⚠️ 中等 |
+| 资源占用 | ✅ 少 | ⚠️ 较多 |
+| 适用场景 | 简单应用 | 生产环境推荐 |
+
+**推荐：** 在生产环境中始终使用 ConsumerManager 管理多个独立的消费者实例。
+
+## 🔧 高级功能
 
 ### 消息去重
 
-在高并发或网络重试场景下，可能会出现消息重复。本库提供了完善的消息去重机制。
+Kafka 工具库内置了消息去重机制，支持内存和 Redis 两种存储方式。
 
-#### 去重原理
+#### 启用去重
 
-1. **唯一标识生成**：优先使用消息 Key，否则使用 `topic:partition:offset`
-2. **去重检查**：在处理消息前检查是否已处理过
-3. **标记已处理**：处理成功后标记消息，设置过期时间
-4. **容错设计**：如果去重检查失败，继续处理消息（宁可重复也不丢失）
+```go
+// 初始化去重器
+deduplicator := kafka.NewMemoryDeduplicator(10 * time.Minute)
+consumer.SetDeduplicator(deduplicator)
+
+// 或者使用 Redis 去重
+redisClient := redis.NewClient(&redis.Options{
+    Addr: "localhost:6379",
+})
+deduplicator := kafka.NewRedisDeduplicator(redisClient, 10*time.Minute)
+consumer.SetDeduplicator(deduplicator)
+```
 
 ### 内存去重存储
 
 适用于单机应用或测试环境：
 
 ```go
-package main
+// 创建内存去重器，过期时间 10 分钟
+deduplicator := kafka.NewMemoryDeduplicator(10 * time.Minute)
 
-import (
-    "context"
-    "log"
-    "time"
-    "github.com/xm-utils/tools/kafka"
-    "github.com/segmentio/kafka-go"
-)
-
-func main() {
-    // 初始化消费者
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "orders",
-        GroupID: "order-processor",
-    }
-    kafka.InitConsumer(config)
-
-    // 创建内存去重存储
-    memoryStore := kafka.NewMemoryDeduplicationStore()
-    defer memoryStore.Close()
-
-    // 创建去重器（TTL 24小时）
-    deduplicator := kafka.NewMessageDeduplicator(memoryStore, 24*time.Hour)
-
-    // 原始消息处理器
-    orderHandler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        log.Printf("Processing order: %s", string(msg.Value))
-        // 处理订单逻辑
-        return nil
-    }
-
-    // 包装处理器，添加去重功能
-    deduplicatedHandler := deduplicator.WrapHandlerWithDeduplication(orderHandler)
-
-    // 启动消费（自动去重）
-    ctx := context.Background()
-    kafka.Subscribe(ctx, deduplicatedHandler)
-}
-```
-
-**内存去重特点：**
-- ✅ 速度快，无网络开销
-- ✅ 无需额外依赖
-- ❌ 重启后去重记录丢失
-- ❌ 不支持分布式环境
-- ❌ 占用应用内存
-
-**监控去重记录数：**
-
-```go
-ticker := time.NewTicker(1 * time.Minute)
-defer ticker.Stop()
-
-for range ticker.C {
-    count := memoryStore.GetRecordCount()
-    log.Printf("Current deduplication records: %d", count)
-}
-```
-
-### Redis 去重存储
-
-适用于分布式环境或多实例部署：
-
-```go
-package main
-
-import (
-    "context"
-    "log"
-    "time"
-    "github.com/xm-utils/tools/kafka"
-    "github.com/segmentio/kafka-go"
-    "github.com/go-redis/redis/v8"
-)
-
-func main() {
-    // 初始化 Redis 客户端
-    redisClient := redis.NewClient(&redis.Options{
-        Addr:     "localhost:6379",
-        Password: "",
-        DB:       0,
-    })
-    defer redisClient.Close()
-
-    // 初始化消费者
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "payments",
-        GroupID: "payment-processor",
-    }
-    kafka.InitConsumer(config)
-
-    // 创建 Redis 去重存储
-    redisStore := kafka.NewRedisDeduplicationStore(redisClient)
-    defer redisStore.Close()
-
-    // 创建去重器（TTL 48小时）
-    deduplicator := kafka.NewMessageDeduplicator(redisStore, 48*time.Hour)
-
-    // 原始消息处理器
-    paymentHandler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        log.Printf("Processing payment: %s", string(msg.Value))
-        // 处理支付逻辑
-        return nil
-    }
-
-    // 包装处理器，添加去重功能
-    deduplicatedHandler := deduplicator.WrapHandlerWithDeduplication(paymentHandler)
-
-    // 启动消费（自动去重）
-    ctx := context.Background()
-    kafka.Subscribe(ctx, deduplicatedHandler)
-}
-```
-
-**Redis 去重特点：**
-- ✅ 支持分布式环境
-- ✅ 持久化存储，重启不丢失
-- ✅ 多实例共享去重状态
-- ❌ 需要 Redis 依赖
-- ❌ 有网络开销
-
-**Redis Key 格式：**
-```
-kafka:duplicate:{topic}:{key}
-kafka:duplicate:orders:order-123
-kafka:duplicate:payments:payment-456
-```
-
-### 自定义去重处理器
-
-如果需要更精细的控制，可以手动实现去重逻辑：
-
-```go
-// 自定义去重处理器
-customHandler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    deduplicator := getDeduplicator() // 获取去重器
-    
+// 在消费者中使用
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
     // 检查是否重复
     isDup, err := deduplicator.IsDuplicate(msg)
     if err != nil {
         log.Printf("Check duplicate failed: %v", err)
-        // 继续处理，避免消息丢失
-    } else if isDup {
+        return err
+    }
+    
+    if isDup {
         log.Printf("Skip duplicate message: key=%s", string(msg.Key))
         return nil
     }
@@ -981,37 +783,122 @@ customHandler := func(ctx context.Context, topic string, msg kafka.Message) erro
     }
     
     // 标记为已处理
-    if err := deduplicator.MarkProcessed(msg); err != nil {
-        log.Printf("Mark processed failed: %v", err)
-        // 不影响业务逻辑
+    return deduplicator.MarkProcessed(msg)
+}
+```
+
+**优点：**
+- ✅ 速度快，无网络开销
+- ✅ 无需外部依赖
+
+**缺点：**
+- ❌ 重启后数据丢失
+- ❌ 不支持分布式
+
+### Redis 去重存储
+
+适用于生产环境和分布式系统：
+
+```go
+import "github.com/go-redis/redis/v8"
+
+// 创建 Redis 客户端
+redisClient := redis.NewClient(&redis.Options{
+    Addr:     "localhost:6379",
+    Password: "",
+    DB:       0,
+})
+
+// 创建 Redis 去重器，过期时间 10 分钟
+deduplicator := kafka.NewRedisDeduplicator(redisClient, 10*time.Minute)
+
+// 在消费者中使用
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 检查是否重复
+    isDup, err := deduplicator.IsDuplicate(msg)
+    if err != nil {
+        log.Printf("Check duplicate failed: %v", err)
+        return err
     }
     
-    return nil
+    if isDup {
+        log.Printf("Skip duplicate message: key=%s", string(msg.Key))
+        return nil
+    }
+    
+    // 处理消息
+    if err := processMessage(msg); err != nil {
+        return err
+    }
+    
+    // 标记为已处理
+    return deduplicator.MarkProcessed(msg)
 }
+```
 
-kafka.Subscribe(ctx, customHandler)
+**优点：**
+- ✅ 持久化存储
+- ✅ 支持分布式
+- ✅ 重启不丢失
+
+**缺点：**
+- ❌ 需要 Redis 依赖
+- ❌ 有网络开销
+
+**Redis Key 格式：**
+```
+kafka:duplicate:{topic}:{key}
+kafka:duplicate:orders:order-123
+kafka:duplicate:payments:payment-456
 ```
 
 ## ⚙️ 配置说明
 
-### Config 配置结构
+### ProducerConfig 生产者配置
 
 ```go
-type Config struct {
-    Brokers       []string      // Kafka broker地址列表
-    Topic         string        // 默认主题（单主题模式）
-    Topics        []string      // 多主题列表（多主题模式）
-    GroupID       string        // 消费者组ID
-    ClientID      string        // 客户端ID
-    MaxAttempts   int           // 最大重试次数
-    DialTimeout   time.Duration // 连接超时时间
-    ReadTimeout   time.Duration // 读取超时时间
-    WriteTimeout  time.Duration // 写入超时时间
-    BatchSize     int           // 批量大小
-    BatchBytes    int64         // 批量字节数
-    MinBytes      int           // 最小字节数
-    MaxBytes      int           // 最大字节数
-    QueueCapacity int           // 队列容量
+type ProducerConfig struct {
+    CommonConfig           `yaml:",inline"`         // 公共配置
+    Topic                  string                   `yaml:"topic"`                    // 默认主题
+    MaxAttempts            int                      `yaml:"max_attempts"`             // 最大重试次数
+    DialTimeout            time.Duration            `yaml:"dial_timeout"`             // 连接超时
+    ReadTimeout            time.Duration            `yaml:"read_timeout"`             // 读取超时
+    WriteTimeout           time.Duration            `yaml:"write_timeout"`            // 写入超时
+    BatchSize              int                      `yaml:"batch_size"`               // 批量大小
+    BatchBytes             int64                    `yaml:"batch_bytes"`              // 批量字节数
+    BatchTimeout           time.Duration            `yaml:"batch_timeout"`            // 批量超时
+    RequiredAcks           kafka.RequiredAcks       `yaml:"required_acks"`            // 确认级别
+    Async                  bool                     `yaml:"async"`                    // 异步发送
+    AllowAutoTopicCreation bool                     `yaml:"allow_auto_topic_creation"` // 允许自动创建主题
+}
+```
+
+### ConsumerConfig 消费者配置
+
+```go
+type ConsumerConfig struct {
+    CommonConfig   `yaml:",inline"`    // 公共配置
+    Topics         []string            `yaml:"topics"`          // 多主题列表
+    Topic          string              `yaml:"topic"`           // 单主题
+    GroupID        string              `yaml:"group_id"`        // 消费组 ID
+    StartOffset    int64               `yaml:"start_offset"`    // 起始 offset
+    MinBytes       int                 `yaml:"min_bytes"`       // 最小字节数
+    MaxBytes       int                 `yaml:"max_bytes"`       // 最大字节数
+    MaxWait        time.Duration       `yaml:"max_wait"`        // 最大等待时间
+    QueueCapacity  int                 `yaml:"queue_capacity"`  // 队列容量
+    AutoCommit     bool                `yaml:"auto_commit"`     // 自动提交
+    CommitInterval time.Duration       `yaml:"commit_interval"` // 提交间隔
+    MaxRetries     int                 `yaml:"max_retries"`     // 最大重试次数
+    RetryBackoff   time.Duration       `yaml:"retry_backoff"`   // 重试退避
+}
+```
+
+### CommonConfig 公共配置
+
+```go
+type CommonConfig struct {
+    Brokers  []string `yaml:"brokers"`   // Kafka broker 地址列表
+    ClientID string   `yaml:"client_id"` // 客户端 ID
 }
 ```
 
@@ -1022,1224 +909,258 @@ type Config struct {
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | Brokers | []string | 是 | - | Kafka broker 地址列表，如 `["localhost:9092"]` |
+| ClientID | string | 否 | "" | 客户端 ID，用于标识应用 |
 | Topic | string | 否* | - | 单主题模式下的主题名称 |
 | Topics | []string | 否* | - | 多主题模式下的主题列表 |
 | GroupID | string | 消费时必填 | - | 消费者组 ID，用于负载均衡和 offset 管理 |
-| ClientID | string | 否 | "" | 客户端 ID，用于标识应用 |
 
 **注意**：Topic 和 Topics 至少需要配置一个。
-
-#### 重试和超时配置
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| MaxAttempts | int | 10 | 最大重试次数（生产者） |
-| DialTimeout | time.Duration | 10s | 连接超时时间 |
-| ReadTimeout | time.Duration | 10s | 读取超时时间 |
-| WriteTimeout | time.Duration | 10s | 写入超时时间 |
 
 #### 生产者配置
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
+| MaxAttempts | int | 3 | 最大重试次数 |
+| DialTimeout | time.Duration | 10s | 连接超时时间 |
+| ReadTimeout | time.Duration | 10s | 读取超时时间 |
+| WriteTimeout | time.Duration | 10s | 写入超时时间 |
 | BatchSize | int | 1000 | 批量发送的消息数量 |
-| BatchBytes | int64 | 1MB (1048576) | 批量发送的最大字节数 |
+| BatchBytes | int64 | 10MB | 批量发送的最大字节数 |
+| BatchTimeout | time.Duration | 10ms | 批量超时时间 |
+| RequiredAcks | kafka.RequiredAcks | RequireAll | 确认策略 |
+| Async | bool | true | 是否异步发送 |
+| AllowAutoTopicCreation | bool | false | 是否允许自动创建主题 |
 
-**批量配置说明：**
-- `BatchSize`: 达到此数量后立即发送
-- `BatchBytes`: 达到此字节数后立即发送
-- `BatchTimeout`: 固定为 10ms，超时后也会发送
+**RequiredAcks 可选值：**
+- `kafka.RequireNone (0)`: 不需要任何确认，性能最高但可靠性最低
+- `kafka.WaitForLocal (1)`: 只需要 leader 副本确认
+- `kafka.RequireAll (-1)`: 需要所有同步副本确认，可靠性最高
 
 #### 消费者配置
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
+| StartOffset | int64 | FirstOffset (-2) | 起始 offset：-2=FirstOffset, -1=LastOffset |
 | MinBytes | int | 1 | 每次读取的最小字节数 |
-| MaxBytes | int | 1MB (1048576) | 每次读取的最大字节数 |
-| QueueCapacity | int | 1000 | 队列容量（预留配置） |
+| MaxBytes | int | 10MB | 每次读取的最大字节数 |
+| MaxWait | time.Duration | 1s | 最大等待时间 |
+| QueueCapacity | int | 1000 | 队列容量 |
 | AutoCommit | bool | false | 是否自动提交 offset（推荐手动提交） |
 | CommitInterval | time.Duration | 0 | 自动提交间隔（AutoCommit=true 时有效） |
-| StartOffset | int64 | FirstOffset (-2) | 起始 offset：-2=FirstOffset, -1=LastOffset |
 | MaxRetries | int | 3 | 消息处理最大重试次数 |
 | RetryBackoff | time.Duration | 1s | 重试退避时间（指数退避） |
 
 **消费者内部配置（不可配置）：**
-- `MaxWait`: 1s - 最大等待时间
 - `HeartbeatInterval`: 3s - 心跳间隔
 - `SessionTimeout`: 30s - 会话超时
 - `RebalanceTimeout`: 30s - 重平衡超时
 - `ReadBackoffMin`: 100ms - 最小退避时间
 - `ReadBackoffMax`: 1s - 最大退避时间
 
-**消息确认配置详解：**
-
-1. **AutoCommit（自动提交）**
-   - `false`（默认）：手动提交模式，消息处理成功后才提交 offset
-   - `true`：自动提交模式，定期提交 offset，不管消息是否处理成功
-   - **推荐**：生产环境使用 `false`，保证消息不丢失
-
-2. **CommitInterval（提交间隔）**
-   - 仅在 `AutoCommit=true` 时生效
-   - 建议设置 5-10 秒
-   - 过短会增加 Kafka 负担，过长可能导致重复处理
-
-3. **StartOffset（起始 offset）**
-   - `kafka.FirstOffset` (-2)：从最早的消息开始消费
-   - `kafka.LastOffset` (-1)：从最新的消息开始消费（忽略历史消息）
-   - **建议**：新消费者组使用 `FirstOffset`，确保不遗漏消息
-
-4. **MaxRetries（最大重试）**
-   - 消息处理失败后的重试次数
-   - 建议设置 3-5 次
-   - 达到最大重试后，记录错误并跳过该消息
-
-5. **RetryBackoff（重试退避）**
-   - 初始退避时间，每次重试翻倍
-   - 例如：设置为 2s，重试间隔为 2s, 4s, 8s, 16s, 32s...
-   - 最大不超过 5 分钟
-
 ## 💡 使用示例
-
-### 基础生产者示例
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log"
-    "time"
-    "github.com/xm-utils/tools/kafka"
-)
-
-// Order 订单结构
-type Order struct {
-    OrderID   int64   `json:"order_id"`
-    UserID    int64   `json:"user_id"`
-    Amount    float64 `json:"amount"`
-    CreatedAt int64   `json:"created_at"`
-}
-
-func main() {
-    // 初始化生产者
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-    }
-
-    if err := kafka.InitProducer(config); err != nil {
-        log.Fatalf("Failed to init producer: %v", err)
-    }
-    defer kafka.GetProducer().Close()
-
-    log.Println("✓ Producer initialized")
-
-    // 发布订单消息
-    ctx := context.Background()
-    
-    for i := 1; i <= 10; i++ {
-        order := Order{
-            OrderID:   int64(i),
-            UserID:    1000 + int64(i),
-            Amount:    float64(i * 100),
-            CreatedAt: time.Now().Unix(),
-        }
-
-        jsonData, _ := json.Marshal(order)
-        key := fmt.Sprintf("order-%d", order.OrderID)
-
-        if err := kafka.Publish(ctx, "orders", key, jsonData); err != nil {
-            log.Printf("Failed to publish order %d: %v", order.OrderID, err)
-        } else {
-            fmt.Printf("✓ Published order %d\n", order.OrderID)
-        }
-
-        time.Sleep(100 * time.Millisecond)
-    }
-}
-```
-
-### 基础消费者示例
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "log"
-    "os"
-    "os/signal"
-    "syscall"
-    "github.com/xm-utils/tools/kafka"
-    "github.com/segmentio/kafka-go"
-)
-
-// Order 订单结构
-type Order struct {
-    OrderID   int64   `json:"order_id"`
-    UserID    int64   `json:"user_id"`
-    Amount    float64 `json:"amount"`
-    CreatedAt int64   `json:"created_at"`
-}
-
-func main() {
-    // 初始化消费者
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "orders",
-        GroupID: "order-processor",
-    }
-
-    if err := kafka.InitConsumer(config); err != nil {
-        log.Fatalf("Failed to init consumer: %v", err)
-    }
-    defer kafka.GetConsumer().Close()
-
-    log.Println("✓ Consumer initialized")
-
-    // 定义消息处理器
-    handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        var order Order
-        if err := json.Unmarshal(msg.Value, &order); err != nil {
-            return fmt.Errorf("unmarshal order failed: %w", err)
-        }
-
-        log.Printf("Received order: ID=%d, User=%d, Amount=%.2f", 
-            order.OrderID, order.UserID, order.Amount)
-
-        // 处理订单业务逻辑
-        processOrder(order)
-
-        return nil
-    }
-
-    // 创建可取消的 context
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    // 监听信号，优雅退出
-    go func() {
-        sigChan := make(chan os.Signal, 1)
-        signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-        sig := <-sigChan
-        log.Printf("Received signal: %v, shutting down...", sig)
-        cancel()
-    }()
-
-    // 启动消费
-    log.Println("Starting to consume messages...")
-    if err := kafka.Subscribe(ctx, handler); err != nil {
-        if err == context.Canceled {
-            log.Println("Consumer stopped gracefully")
-        } else {
-            log.Printf("Consumer error: %v", err)
-        }
-    }
-}
-
-func processOrder(order Order) {
-    // 订单处理逻辑
-    log.Printf("Processing order %d...", order.OrderID)
-}
-```
-
-### 多主题消费者示例
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "log"
-    "github.com/xm-utils/tools/kafka"
-    "github.com/segmentio/kafka-go"
-)
-
-// 不同主题的消息结构
-type OrderEvent struct {
-    OrderID int64  `json:"order_id"`
-    Status  string `json:"status"`
-}
-
-type PaymentEvent struct {
-    PaymentID int64   `json:"payment_id"`
-    OrderID   int64   `json:"order_id"`
-    Amount    float64 `json:"amount"`
-}
-
-type ShippingEvent struct {
-    ShippingID int64  `json:"shipping_id"`
-    OrderID    int64  `json:"order_id"`
-    Location   string `json:"location"`
-}
-
-func main() {
-    // 多主题配置
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topics: []string{
-            "order-events",
-            "payment-events",
-            "shipping-events",
-        },
-        GroupID: "ecommerce-processor",
-    }
-
-    if err := kafka.InitConsumer(config); err != nil {
-        log.Fatalf("Failed to init consumer: %v", err)
-    }
-    defer kafka.GetConsumer().Close()
-
-    // 统一消息处理器，根据主题分发
-    handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        switch topic {
-        case "order-events":
-            return handleOrderEvent(msg)
-            
-        case "payment-events":
-            return handlePaymentEvent(msg)
-            
-        case "shipping-events":
-            return handleShippingEvent(msg)
-            
-        default:
-            log.Printf("Unknown topic: %s", topic)
-            return nil
-        }
-    }
-
-    ctx := context.Background()
-    log.Println("Starting multi-topic consumer...")
-    kafka.Subscribe(ctx, handler)
-}
-
-func handleOrderEvent(msg kafka.Message) error {
-    var event OrderEvent
-    if err := json.Unmarshal(msg.Value, &event); err != nil {
-        return err
-    }
-    
-    log.Printf("Order event: ID=%d, Status=%s", event.OrderID, event.Status)
-    // 处理订单事件
-    return nil
-}
-
-func handlePaymentEvent(msg kafka.Message) error {
-    var event PaymentEvent
-    if err := json.Unmarshal(msg.Value, &event); err != nil {
-        return err
-    }
-    
-    log.Printf("Payment event: ID=%d, Order=%d, Amount=%.2f", 
-        event.PaymentID, event.OrderID, event.Amount)
-    // 处理支付事件
-    return nil
-}
-
-func handleShippingEvent(msg kafka.Message) error {
-    var event ShippingEvent
-    if err := json.Unmarshal(msg.Value, &event); err != nil {
-        return err
-    }
-    
-    log.Printf("Shipping event: ID=%d, Order=%d, Location=%s", 
-        event.ShippingID, event.OrderID, event.Location)
-    // 处理物流事件
-    return nil
-}
-```
-
-### 带去重的消费者示例
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "log"
-    "time"
-    "github.com/xm-utils/tools/kafka"
-    "github.com/segmentio/kafka-go"
-    "github.com/go-redis/redis/v8"
-)
-
-// Payment 支付消息
-type Payment struct {
-    PaymentID int64   `json:"payment_id"`
-    OrderID   int64   `json:"order_id"`
-    Amount    float64 `json:"amount"`
-    Status    string  `json:"status"`
-}
-
-func main() {
-    // 初始化 Redis
-    redisClient := redis.NewClient(&redis.Options{
-        Addr: "localhost:6379",
-    })
-    defer redisClient.Close()
-
-    // 初始化消费者
-    config := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "payments",
-        GroupID: "payment-processor",
-    }
-
-    if err := kafka.InitConsumer(config); err != nil {
-        log.Fatalf("Failed to init consumer: %v", err)
-    }
-    defer kafka.GetConsumer().Close()
-
-    // 创建 Redis 去重存储（TTL 48小时）
-    redisStore := kafka.NewRedisDeduplicationStore(redisClient)
-    defer redisStore.Close()
-
-    deduplicator := kafka.NewMessageDeduplicator(redisStore, 48*time.Hour)
-
-    // 原始支付处理器
-    paymentHandler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        var payment Payment
-        if err := json.Unmarshal(msg.Value, &payment); err != nil {
-            return err
-        }
-
-        log.Printf("Processing payment: ID=%d, Order=%d, Amount=%.2f", 
-            payment.PaymentID, payment.OrderID, payment.Amount)
-
-        // 模拟处理延迟
-        time.Sleep(100 * time.Millisecond)
-
-        // 处理支付业务逻辑
-        return processPayment(payment)
-    }
-
-    // 包装处理器，添加去重功能
-    deduplicatedHandler := deduplicator.WrapHandlerWithDeduplication(paymentHandler)
-
-    // 启动消费
-    ctx := context.Background()
-    log.Println("Starting consumer with deduplication...")
-    kafka.Subscribe(ctx, deduplicatedHandler)
-}
-
-func processPayment(payment Payment) error {
-    // 支付处理逻辑
-    log.Printf("Payment processed successfully: ID=%d", payment.PaymentID)
-    return nil
-}
-```
 
 ### 完整的微服务示例
 
-一个完整的订单处理微服务，包含生产者和消费者：
-
 ```go
 package main
 
 import (
     "context"
     "encoding/json"
-    "fmt"
     "log"
-    "net/http"
     "os"
     "os/signal"
     "syscall"
     "time"
-    "github.com/xm-utils/tools/kafka"
+    
     "github.com/segmentio/kafka-go"
-    "github.com/go-redis/redis/v8"
+    "github.com/xm-utils/tools/kafka"
 )
 
-// OrderService 订单服务
-type OrderService struct {
-    deduplicator *kafka.MessageDeduplicator
-}
-
-// NewOrderService 创建订单服务
-func NewOrderService() *OrderService {
-    // 初始化 Redis 去重
-    redisClient := redis.NewClient(&redis.Options{
-        Addr: "localhost:6379",
-    })
-    
-    redisStore := kafka.NewRedisDeduplicationStore(redisClient)
-    deduplicator := kafka.NewMessageDeduplicator(redisStore, 24*time.Hour)
-    
-    return &OrderService{
-        deduplicator: deduplicator,
-    }
-}
-
-// CreateOrder 创建订单并发布到 Kafka
-func (s *OrderService) CreateOrder(w http.ResponseWriter, r *http.Request) {
-    var order map[string]interface{}
-    if err := json.NewDecoder(r.Body).Decode(&order); err != nil {
-        http.Error(w, err.Error(), http.StatusBadRequest)
-        return
-    }
-
-    order["created_at"] = time.Now().Unix()
-    jsonData, _ := json.Marshal(order)
-    
-    orderID := fmt.Sprintf("%v", order["order_id"])
-    ctx := context.Background()
-    
-    if err := kafka.Publish(ctx, "orders", orderID, jsonData); err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]string{
-        "status": "success",
-        "message": "Order created",
-    })
-}
-
-// StartConsumer 启动订单消费者
-func (s *OrderService) StartConsumer(ctx context.Context) {
-    handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-        log.Printf("Processing order: %s", string(msg.Value))
-        
-        // 这里可以添加业务逻辑
-        // 例如：更新数据库、发送通知等
-        
-        return nil
-    }
-
-    // 使用去重处理器
-    deduplicatedHandler := s.deduplicator.WrapHandlerWithDeduplication(handler)
-    
-    log.Println("Starting order consumer...")
-    kafka.Subscribe(ctx, deduplicatedHandler)
+// Order 订单结构
+type Order struct {
+    OrderID   int64   `json:"order_id"`
+    UserID    int64   `json:"user_id"`
+    Amount    float64 `json:"amount"`
+    CreatedAt int64   `json:"created_at"`
 }
 
 func main() {
-    // Kafka 配置
-    kafkaConfig := &kafka.Config{
-        Brokers: []string{"localhost:9092"},
-        Topic:   "orders",
-        GroupID: "order-service",
-    }
-
-    // 初始化生产者和消费者
-    if err := kafka.InitProducer(kafkaConfig); err != nil {
-        log.Fatalf("Failed to init producer: %v", err)
-    }
-    defer kafka.GetProducer().Close()
-
-    if err := kafka.InitConsumer(kafkaConfig); err != nil {
-        log.Fatalf("Failed to init consumer: %v", err)
-    }
-    defer kafka.GetConsumer().Close()
-
-    log.Println("✓ Kafka initialized")
-
-    // 创建订单服务
-    service := NewOrderService()
-
-    // 启动 HTTP 服务器
-    http.HandleFunc("/api/orders", service.CreateOrder)
+    // 获取消费者管理器
+    manager := kafka.GetConsumerManager()
     
-    server := &http.Server{Addr: ":8080"}
-    go func() {
-        log.Println("✓ HTTP server starting on :8080")
-        if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            log.Fatalf("HTTP server error: %v", err)
-        }
-    }()
-
+    // 注册订单业务消费者
+    orderConfig := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers:  []string{"localhost:9092"},
+            ClientID: "order-service",
+        },
+        Topic:      "orders",
+        GroupID:    "order-service-group",
+        MaxRetries: 3,
+        RetryBackoff: 2 * time.Second,
+    }
+    
+    if err := manager.RegisterConsumer("order", orderConfig); err != nil {
+        log.Fatalf("注册订单消费者失败: %v", err)
+    }
+    
+    // 定义消息处理器
+    handlers := map[string]kafka.TopicHandler{
+        "order": func(ctx context.Context, topic string, msg kafka.Message) error {
+            var order Order
+            if err := json.Unmarshal(msg.Value, &order); err != nil {
+                log.Printf("解析订单消息失败: %v", err)
+                return nil // 解析失败不重试
+            }
+            
+            log.Printf("收到订单: ID=%d, User=%d, Amount=%.2f", 
+                order.OrderID, order.UserID, order.Amount)
+            
+            // TODO: 处理订单业务逻辑
+            return nil
+        },
+    }
+    
     // 启动消费者
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
     
-    go service.StartConsumer(ctx)
-
-    // 优雅退出
+    go func() {
+        if err := manager.StartAll(ctx, handlers); err != nil {
+            log.Printf("消费者运行错误: %v", err)
+        }
+    }()
+    
+    log.Println("订单服务已启动")
+    
+    // 优雅关闭
     sigChan := make(chan os.Signal, 1)
     signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
     <-sigChan
-
-    log.Println("Shutting down...")
     
-    // 关闭 HTTP 服务器
-    shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-    defer shutdownCancel()
-    server.Shutdown(shutdownCtx)
-    
-    // 取消消费者 context
+    log.Println("正在关闭...")
     cancel()
-    
-    log.Println("Service stopped")
+    manager.CloseAll()
+    log.Println("订单服务已停止")
 }
 ```
 
-## 📚 API 参考
-
-### 生产者 API
-
-#### 初始化和获取
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `InitProducer(config *Config) error` | 初始化生产者 | error: 初始化错误 |
-| `GetProducer() *Producer` | 获取默认生产者实例 | producer: 生产者实例 |
-
-#### 消息发布
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `Publish(ctx context.Context, topic string, key string, value []byte) error` | 发布单条消息（包级别） | error: 发布错误 |
-| `(p *Producer) Publish(ctx context.Context, topic string, key string, value []byte) error` | 发布单条消息（实例方法） | error: 发布错误 |
-| `(p *Producer) PublishBatch(ctx context.Context, messages []kafka.Message) error` | 批量发布消息 | error: 发布错误 |
-
-#### 生命周期管理
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `(p *Producer) Close()` | 关闭生产者 | - |
-
-### 消费者 API
-
-#### 初始化和获取
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `InitConsumer(config *Config) error` | 初始化消费者 | error: 初始化错误 |
-| `GetConsumer() *Consumer` | 获取默认消费者实例 | consumer: 消费者实例 |
-
-#### 消息订阅
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `Subscribe(ctx context.Context, handler TopicHandler) error` | 订阅消息（包级别） | error: 订阅错误 |
-| `(c *Consumer) Subscribe(ctx context.Context, handler TopicHandler) error` | 订阅消息（实例方法） | error: 订阅错误 |
-| `SubscribeWithTopicHandler(ctx context.Context, handler TopicHandler) error` | 订阅消息并支持主题分发（包级别） | error: 订阅错误 |
-| `(c *Consumer) SubscribeWithTopicHandler(ctx context.Context, handler TopicHandler) error` | 订阅消息并支持主题分发（实例方法） | error: 订阅错误 |
-
-#### 生命周期管理
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `(c *Consumer) Close()` | 关闭消费者 | - |
-
-### 去重 API
-
-#### DeduplicationStore 接口
-
-```go
-type DeduplicationStore interface {
-    IsDuplicate(key string) (bool, error)
-    MarkProcessed(key string, ttl time.Duration) error
-    Close() error
-}
-```
-
-#### MessageDeduplicator
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `NewMessageDeduplicator(store DeduplicationStore, ttl time.Duration) *MessageDeduplicator` | 创建消息去重器 | deduplicator: 去重器实例 |
-| `(d *MessageDeduplicator) GenerateKey(msg kafka.Message) string` | 生成去重 key | key: 唯一标识 |
-| `(d *MessageDeduplicator) IsDuplicate(msg kafka.Message) (bool, error)` | 检查消息是否重复 | isDuplicate: 是否重复, error: 错误 |
-| `(d *MessageDeduplicator) MarkProcessed(msg kafka.Message) error` | 标记消息已处理 | error: 错误 |
-| `(d *MessageDeduplicator) WrapHandlerWithDeduplication(handler TopicHandler) TopicHandler` | 包装处理器添加去重功能 | handler: 包装后的处理器 |
-
-#### MemoryDeduplicationStore
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `NewMemoryDeduplicationStore() *MemoryDeduplicationStore` | 创建内存去重存储 | store: 存储实例 |
-| `(s *MemoryDeduplicationStore) GetRecordCount() int` | 获取当前记录数 | count: 记录数量 |
-
-#### RedisDeduplicationStore
-
-| 函数签名 | 说明 | 返回值 |
-|---------|------|--------|
-| `NewRedisDeduplicationStore(client *redis.Client) *RedisDeduplicationStore` | 创建 Redis 去重存储 | store: 存储实例 |
-
-### 数据结构
-
-#### Config
-
-Kafka 配置结构：
-
-```go
-type Config struct {
-    Brokers       []string      // Kafka broker地址列表
-    Topic         string        // 默认主题（单主题模式）
-    Topics        []string      // 多主题列表（多主题模式）
-    GroupID       string        // 消费者组ID
-    ClientID      string        // 客户端ID
-    MaxAttempts   int           // 最大重试次数
-    DialTimeout   time.Duration // 连接超时时间
-    ReadTimeout   time.Duration // 读取超时时间
-    WriteTimeout  time.Duration // 写入超时时间
-    BatchSize     int           // 批量大小
-    BatchBytes    int64         // 批量字节数
-    MinBytes      int           // 最小字节数
-    MaxBytes      int           // 最大字节数
-    QueueCapacity int           // 队列容量
-}
-```
-
-#### TopicHandler
-
-消息处理函数类型：
-
-```go
-type TopicHandler func(ctx context.Context, topic string, msg kafka.Message) error
-```
-
-**参数说明：**
-- `ctx`: 上下文，用于控制取消
-- `topic`: 消息所属的主题
-- `msg`: Kafka 消息对象
-
-**返回值：**
-- `error`: 处理错误，返回非 nil 表示处理失败
-
-#### kafka.Message
-
-Kafka 消息结构（来自 segmentio/kafka-go）：
-
-```go
-type Message struct {
-    Topic     string            // 主题
-    Partition int               // 分区
-    Offset    int64             // 偏移量
-    Key       []byte            // 消息键
-    Value     []byte            // 消息值
-    Headers   []Header          // 消息头
-    Time      time.Time         // 时间戳
-}
-```
-
-## 📖 最佳实践
+## 🎯 最佳实践
 
 ### 生产环境配置建议
 
-#### 1. Broker 配置
-
 ```go
-config := &kafka.Config{
-    Brokers: []string{
-        "kafka-1.example.com:9092",
-        "kafka-2.example.com:9092",
-        "kafka-3.example.com:9092",
+// 生产者配置
+producerConfig := &kafka.ProducerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"kafka1:9092", "kafka2:9092", "kafka3:9092"},
+        ClientID: "my-service",
     },
+    MaxAttempts:            5,
+    BatchSize:              1000,
+    BatchBytes:             10e6,  // 10MB
+    RequiredAcks:           kafka.RequireAll,  // 最高可靠性
+    AllowAutoTopicCreation: false,  // 生产环境禁止自动创建主题
+}
+
+// 消费者配置
+consumerConfig := &kafka.ConsumerConfig{
+    CommonConfig: kafka.CommonConfig{
+        Brokers: []string{"kafka1:9092", "kafka2:9092", "kafka3:9092"},
+        ClientID: "my-service",
+    },
+    Topic:      "orders",
+    GroupID:    "my-service-group",
+    MaxRetries: 3,
+    RetryBackoff: 2 * time.Second,
+    AutoCommit: false,  // 手动提交保证可靠性
 }
 ```
-
-**建议：**
-- 至少配置 3 个 broker 以实现高可用
-- 使用域名而非 IP，便于运维切换
-- 确保网络连通性和低延迟
-
-#### 2. 重试和超时配置
-
-```go
-config := &kafka.Config{
-    MaxAttempts:  10,           // 适当增加重试次数
-    DialTimeout:  10 * time.Second,
-    ReadTimeout:  10 * time.Second,
-    WriteTimeout: 10 * time.Second,
-}
-```
-
-**建议：**
-- 生产环境适当增加超时时间
-- 根据网络状况调整重试次数
-- 监控重试率，过高时需排查问题
-
-#### 3. 批量配置优化
-
-```go
-config := &kafka.Config{
-    BatchSize:  1000,    // 根据消息大小调整
-    BatchBytes: 1048576, // 1MB
-}
-```
-
-**建议：**
-- 小消息可以增加 BatchSize
-- 大消息需要减小 BatchSize
-- 监控批量发送频率和大小
-
-#### 4. 消费者组管理
-
-```go
-config := &kafka.Config{
-    GroupID: "production-order-processor-v1",
-}
-```
-
-**建议：**
-- 使用有意义的 GroupID，包含环境和版本信息
-- 不同功能的消费者使用不同的 GroupID
-- 升级时考虑使用新的 GroupID 实现蓝绿部署
 
 ### 消息可靠性保证
 
-#### 1. 生产者可靠性
+1. **生产者端**
+   - 设置 `RequiredAcks = kafka.RequireAll`
+   - 启用重试机制 `MaxAttempts >= 3`
+   - 监控发送失败率
 
-```go
-// kafka-go 默认配置已经保证高可靠性：
-// - RequiredAcks: kafka.RequireAll（等待所有副本确认）
-// - Async: false（同步发送）
-// - Completion: 回调记录失败
-```
-
-**建议：**
-- 不要修改为异步模式（Async=true）
-- 保持 RequireAll 配置
-- 实现重试逻辑处理临时失败
-
-#### 2. 消费者可靠性
-
-```go
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    // 1. 先处理业务逻辑
-    if err := processBusinessLogic(msg); err != nil {
-        return err // 返回错误，不提交 offset
-    }
-    
-    // 2. 再标记去重（如果使用）
-    if err := deduplicator.MarkProcessed(msg); err != nil {
-        log.Printf("Mark processed failed: %v", err)
-        // 不影响 offset 提交
-    }
-    
-    return nil // 返回 nil，提交 offset
-}
-```
-
-**建议：**
-- 业务处理失败时返回 error
-- 幂等处理，允许消息重复消费
-- 使用去重机制防止重复处理
-
-#### 3. 消息持久化
-
-```yaml
-# Kafka 服务端配置建议
-log.retention.hours: 168  # 保留 7 天
-log.replication.factor: 3  # 3 副本
-min.insync.replicas: 2     # 最少 2 个副本确认
-```
+2. **消费者端**
+   - 使用手动提交 `AutoCommit = false`
+   - 设置合理的重试次数 `MaxRetries = 3-5`
+   - 记录处理失败的消息到死信队列
 
 ### 性能优化建议
 
-#### 1. 生产者性能
+1. **批量处理**
+   - 增大 `BatchSize` 和 `BatchBytes`
+   - 适当增加 `BatchTimeout`
 
-```go
-// 批量发送优于单条发送
-messages := make([]kafka.Message, 0, 100)
-for _, data := range dataList {
-    messages = append(messages, kafka.Message{
-        Topic: "my-topic",
-        Key:   []byte(data.Key),
-        Value: data.Value,
-    })
-}
-producer.PublishBatch(ctx, messages)
-```
+2. **并行处理**
+   - 增加分区数提高并行度
+   - 使用多个消费者实例
 
-**优化点：**
-- 使用批量发送减少网络往返
-- 预分配切片容量
-- 合理设置 BatchSize 和 BatchBytes
-
-#### 2. 消费者性能
-
-```go
-// 异步处理提高并发度
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    go func(m kafka.Message) {
-        // 异步处理
-        processMessage(m)
-    }(msg)
-    return nil
-}
-```
-
-**注意：** 消费者内部已经实现了异步处理，无需再次 goroutine
-
-**优化点：**
-- 控制并发度，避免资源耗尽
-- 使用连接池访问外部资源
-- 监控消费延迟
-
-#### 3. 资源配置
-
-```go
-config := &kafka.Config{
-    MinBytes: 1,
-    MaxBytes: 1048576, // 根据消息大小调整
-}
-```
-
-**建议：**
-- MaxBytes 设置为预期消息大小的倍数
-- 监控内存使用情况
-- 根据吞吐量调整批处理参数
-
-### 去重策略选择
-
-#### 场景对比
-
-| 场景 | 推荐方案 | 原因 |
-|------|---------|------|
-| 单机应用 | 内存去重 | 简单高效 |
-| 多实例部署 | Redis 去重 | 共享状态 |
-| 测试环境 | 内存去重 | 无需额外依赖 |
-| 金融交易 | Redis 去重 | 数据可靠 |
-| 日志收集 | 不需要去重 | 允许重复 |
-| 订单处理 | Redis 去重 | 业务敏感 |
-
-#### TTL 设置建议
-
-```go
-// 短时效场景（实时性要求高）
-deduplicator := kafka.NewMessageDeduplicator(store, 1*time.Hour)
-
-// 中等时效场景（一般业务）
-deduplicator := kafka.NewMessageDeduplicator(store, 24*time.Hour)
-
-// 长时效场景（对账、审计）
-deduplicator := kafka.NewMessageDeduplicator(store, 7*24*time.Hour)
-```
-
-**建议：**
-- 根据业务重试窗口设置 TTL
-- 考虑 Kafka 消息保留时间
-- 平衡去重效果和存储成本
-
-### 消息确认最佳实践 ⭐ NEW
-
-#### 1. 选择合适的确认模式
-
-| 场景 | 推荐模式 | 原因 |
-|------|---------|------|
-| 订单处理 | 手动提交 | 不能丢失订单 |
-| 支付通知 | 手动提交 | 必须保证到账 |
-| 金融交易 | 手动提交 | 数据一致性要求高 |
-| 日志收集 | 自动提交 | 允许少量丢失 |
-| 监控数据 | 自动提交 | 实时性优先 |
-| 用户行为 | 自动提交 | 允许重复 |
-
-#### 2. 合理设置重试次数
-
-- **临时故障**（网络抖动、数据库连接池满）：3-5 次
-- **业务校验失败**（参数错误、权限不足）：0 次（不重试）
-- **外部依赖故障**（第三方 API 超时）：5-10 次
-
-```go
-// 关键业务配置
-config := &kafka.Config{
-    AutoCommit:   false,
-    MaxRetries:   5,
-    RetryBackoff: 2 * time.Second,
-}
-
-// 非关键业务配置
-config := &kafka.Config{
-    AutoCommit:   true,
-    CommitInterval: 5 * time.Second,
-}
-```
-
-#### 3. 实现幂等性
-
-在手动提交模式下，如果消息处理成功但提交 offset 前消费者崩溃，重启后会重新处理该消息。
-
-**解决方案：**
-- 实现幂等性：确保多次处理同一消息不会产生副作用
-- 使用去重器：结合现有的消息去重功能
-
-```go
-// 幂等性示例
-func processOrder(order Order) error {
-    // 先检查是否已处理
-    if isOrderProcessed(order.ID) {
-        log.Printf("订单已处理，跳过: ID=%d", order.ID)
-        return nil
-    }
-    
-    // 处理订单
-    // ...
-    
-    // 标记为已处理
-    markOrderAsProcessed(order.ID)
-    return nil
-}
-```
-
-#### 4. 死信队列处理
-
-达到最大重试次数后，消息会被跳过。建议将这些消息发送到死信队列进行人工处理。
-
-```go
-func sendToDeadLetterQueue(msg kafka.Message, err error) {
-    deadLetterMsg := kafka.Message{
-        Topic: msg.Topic + ".dlq",
-        Key:   msg.Key,
-        Value: msg.Value,
-        Headers: []kafka.Header{
-            {Key: "original_topic", Value: []byte(msg.Topic)},
-            {Key: "error", Value: []byte(err.Error())},
-            {Key: "timestamp", Value: []byte(time.Now().Format(time.RFC3339))},
-        },
-    }
-    
-    kafka.Publish(context.Background(), deadLetterMsg.Topic, 
-        string(deadLetterMsg.Key), deadLetterMsg.Value)
-}
-```
-
-#### 5. 监控和告警
-
-```go
-// 监控指标
-var (
-    messagesProcessed = prometheus.NewCounterVec(...)
-    messagesFailed    = prometheus.NewCounterVec(...)
-    messageRetryCount = prometheus.NewHistogram(...)
-)
-
-handler := func(ctx context.Context, topic string, msg kafka.Message) error {
-    startTime := time.Now()
-    err := processMessage(msg)
-    duration := time.Since(startTime)
-    
-    if err != nil {
-        messagesFailed.WithLabelValues(topic).Inc()
-    } else {
-        messagesProcessed.WithLabelValues(topic).Inc()
-    }
-    
-    messageRetryCount.Observe(duration.Seconds())
-    return err
-}
-```
-
-#### 6. 优雅关闭
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-// 监听信号
-go func() {
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-    sig := <-sigChan
-    log.Printf("收到信号: %v，准备关闭...", sig)
-    cancel()
-}()
-
-// 启动消费
-if err := consumer.Subscribe(ctx, handler); err != nil {
-    if err == context.Canceled {
-        log.Println("消费者已优雅关闭")
-    }
-}
-```
+3. **资源控制**
+   - 合理设置 `MaxBytes` 避免 OOM
+   - 监控内存使用情况
 
 ## ❓ 常见问题
 
-### Q1: 如何选择单主题还是多主题模式？
+### Q1: 如何保证消息不丢失？
 
-**单主题模式**适用于：
-- 只关注单一业务领域
-- 简单的消息处理逻辑
-- 独立的消费者组
+**A:** 
+1. 生产者使用 `RequiredAcks = kafka.RequireAll`
+2. 消费者使用手动提交 `AutoCommit = false`
+3. 消息处理成功后再提交 offset
+4. 设置合理的重试次数
 
-**多主题模式**适用于：
-- 需要关联多个业务事件
-- 统一的消息处理流程
-- 事件溯源场景
+### Q2: 如何处理消息积压？
 
-### Q2: 消息重复消费怎么办？
+**A:**
+1. 增加消费者实例数量
+2. 增加主题分区数
+3. 优化消息处理逻辑，提高处理速度
+4. 临时增加消费者的 `MaxBytes` 和 `BatchSize`
 
-1. **业务层幂等**：确保多次处理结果一致
-2. **使用去重机制**：本库提供的去重功能
-3. **数据库唯一约束**：利用数据库防止重复插入
+### Q3: 如何实现消息的顺序性？
+
+**A:**
+1. 使用相同的 key 将相关消息发送到同一分区
+2. 消费者单线程处理该分区
+3. 避免使用多线程并发处理同一分区的消息
+
+### Q4: 消费者重启后从哪里开始消费？
+
+**A:** 取决于 `StartOffset` 配置：
+- `kafka.FirstOffset`: 从最早的消息开始
+- `kafka.LastOffset`: 从最新的消息开始
+- 如果已有提交的 offset，从上次提交的位置继续
+
+### Q5: 如何监控消费者状态？
+
+**A:** 使用 ConsumerManager 的健康检查功能：
 
 ```go
-// 幂等处理示例
-func processOrder(order Order) error {
-    // 使用唯一键插入，如果已存在则忽略
-    _, err := db.Exec(
-        "INSERT INTO orders (order_id, ...) VALUES (?, ...) ON DUPLICATE KEY UPDATE ...",
-        order.OrderID, ...,
-    )
-    return err
+manager := kafka.GetConsumerManager()
+health := manager.HealthCheck()
+for business, status := range health {
+    log.Printf("%s: %s", business, status.Status)
 }
 ```
-
-### Q3: 如何保证消息顺序性？
-
-Kafka 只能保证**分区内有序**：
-
-```go
-// 相同 key 的消息会发送到同一分区
-producer.Publish(ctx, "orders", "user-123", order1Data)
-producer.Publish(ctx, "orders", "user-123", order2Data)
-// 这两个消息会按顺序被消费
-```
-
-**建议：**
-- 需要顺序的消息使用相同的 key
-- 避免跨分区的顺序依赖
-- 消费者单线程处理同一分区
-
-### Q4: 消费者 lag 过大如何处理？
-
-1. **增加消费者实例**：横向扩展
-2. **优化处理逻辑**：减少单条消息处理时间
-3. **增加分区数**：提高并行度
-4. **批量处理**：减少 IO 次数
-
-```go
-// 监控 lag
-ticker := time.NewTicker(1 * time.Minute)
-for range ticker.C {
-    stats := consumer.reader.Stats()
-    log.Printf("Consumer lag: %d", stats.Lag)
-}
-```
-
-### Q5: 如何处理大消息？
-
-```go
-config := &kafka.Config{
-    MaxBytes: 10485760, // 增加到 10MB
-}
-```
-
-**建议：**
-- Kafka 不适合传输超大消息
-- 大文件存储到 OSS，消息中传 URL
-- 考虑使用专门的文件传输服务
-
-### Q6: 如何优雅关闭消费者？
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-
-// 监听信号
-go func() {
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-    <-sigChan
-    cancel() // 取消 context
-}()
-
-// 阻塞等待
-if err := consumer.Subscribe(ctx, handler); err != nil {
-    if err == context.Canceled {
-        log.Println("Graceful shutdown")
-    }
-}
-```
-
-### Q7: 内存去重会占用多少内存？
-
-假设：
-- 每条记录约 100 bytes
-- 100万条未过期记录
-
-内存占用 ≈ 100 MB
-
-**监控方法：**
-```go
-count := memoryStore.GetRecordCount()
-log.Printf("Records: %d, Estimated memory: %.2f MB", count, float64(count)*100/1024/1024)
-```
-
-### Q8: Redis 去重失败会影响业务吗？
-
-不会。去重失败只会记录日志，不会阻断消息处理：
-
-```go
-isDup, err := d.IsDuplicate(msg)
-if err != nil {
-    log.Warnf("检查消息重复失败: %v，继续处理", err)
-    // 继续处理，避免消息丢失
-}
-```
-
-**设计理念：** 宁可重复处理，也不能丢失消息。
 
 ## 📦 依赖
 
-```go
-require (
-    github.com/segmentio/kafka-go v0.4.51
-    github.com/sirupsen/logrus v1.9.4
-    github.com/go-redis/redis/v8 v8.11.5  // 可选，用于 Redis 去重
-)
-```
-
-**间接依赖：**
-- github.com/klauspost/compress v1.15.9
-- github.com/pierrec/lz4/v4 v4.1.15
-- golang.org/x/sys v0.13.0
+- Go 1.24.2+
+- github.com/segmentio/kafka-go v0.4.51+
+- github.com/sirupsen/logrus v1.9.4+
+- github.com/go-redis/redis/v8 v8.11.5+（可选，用于 Redis 去重）
 
 ## 📄 许可证
 
 MIT License
 
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
-
-### 贡献指南
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-### 开发建议
-
-- 遵循 Go 代码规范
-- 添加必要的单元测试
-- 更新文档
-- 保持 API 向后兼容
-
-## 📧 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- 提交 [Issue](../../issues)
-- 发送邮件至项目维护者
-
-## 🔗 相关链接
-
-- [Kafka 官方文档](https://kafka.apache.org/documentation/)
-- [segmentio/kafka-go](https://github.com/segmentio/kafka-go)
-- [Kafka 最佳实践](https://github.com/apache/kafka)
-
 ---
 
-**注意**：使用前请确保已部署并运行 Kafka 集群。推荐使用 Kafka 2.x 或更高版本。
+**更多问题？** 欢迎提 Issue 或 PR！
 
-**版本信息**：
-- 当前版本：v1.1.0
-- Kafka SDK 版本：v0.4.51
-- Go 版本要求：1.24.2+
 
-**主要更新**：
-- ✅ 新增消息确认机制（手动/自动提交 offset）
-- ✅ 新增内置重试机制（指数退避策略）
-- ✅ 新增 MessageContext 消息上下文
-- ✅ 新增起始 Offset 配置选项
-- ✅ 完善最佳实践和常见问题文档

@@ -20,11 +20,11 @@ type TopicHandler func(ctx context.Context, topic string, msg kafka.Message) err
 type Producer struct {
 	writer *kafka.Writer
 	log    *logrus.Entry
-	config *Config
+	config *ProducerConfig
 }
 
 // InitProducer 初始化生产者
-func InitProducer(config *Config) error {
+func InitProducer(config *ProducerConfig) error {
 	if config == nil {
 		return fmt.Errorf("kafka config is nil")
 	}
@@ -34,8 +34,6 @@ func InitProducer(config *Config) error {
 	}
 
 	log := logrus.WithField("module", "Kafka Producer")
-	// 设置默认值
-	setProducerDefaults(config)
 
 	writer := &kafka.Writer{
 		Addr:         kafka.TCP(config.Brokers...),
@@ -117,27 +115,5 @@ func (p *Producer) Close() {
 		} else {
 			p.log.Info("Kafka生产者已关闭")
 		}
-	}
-}
-
-// SetProducerDefaults 设置生产者默认值
-func setProducerDefaults(config *Config) {
-	if config.MaxAttempts == 0 {
-		config.MaxAttempts = 10
-	}
-	if config.DialTimeout == 0 {
-		config.DialTimeout = 10 * time.Second
-	}
-	if config.ReadTimeout == 0 {
-		config.ReadTimeout = 10 * time.Second
-	}
-	if config.WriteTimeout == 0 {
-		config.WriteTimeout = 10 * time.Second
-	}
-	if config.BatchSize == 0 {
-		config.BatchSize = 1000
-	}
-	if config.BatchBytes == 0 {
-		config.BatchBytes = 1048576 // 1MB
 	}
 }

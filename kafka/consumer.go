@@ -15,20 +15,18 @@ var defaultConsumer *Consumer
 type Consumer struct {
 	reader *kafka.Reader
 	log    *logrus.Entry
-	config *Config
+	config *ConsumerConfig
 }
 
 // MessageContext 消息上下文，包含消息和确认方法
 type MessageContext struct {
 	Message   kafka.Message
 	Commit    func() error // 提交offset（确认消息）
-	Retry     int          // 当前重试次数
-	MaxRetry  int          // 最大重试次数
 	ShouldAck bool         // 是否应该确认（手动模式下由业务代码设置）
 }
 
 // InitConsumer 初始化消费者（支持单主题和多主题）
-func InitConsumer(config *Config) error {
+func InitConsumer(config *ConsumerConfig) error {
 	if config == nil {
 		return fmt.Errorf("kafka config is nil")
 	}
@@ -47,8 +45,6 @@ func InitConsumer(config *Config) error {
 	}
 
 	log := logrus.WithField("module", "Kafka Consumer")
-	// 设置默认值
-	setConsumerDefaults(config)
 
 	// 构建 ReaderConfig
 	readerConfig := kafka.ReaderConfig{
@@ -64,7 +60,7 @@ func InitConsumer(config *Config) error {
 		StartOffset:       getStartOffset(config.StartOffset),
 		ReadBackoffMin:    100 * time.Millisecond,
 		ReadBackoffMax:    1 * time.Second,
-		CommitInterval:    config.CommitInterval, // 设置提交间隔
+		CommitInterval:    config.CommitInterval,
 	}
 
 	// 根据配置选择单主题或多主题模式
@@ -102,14 +98,6 @@ func Subscribe(ctx context.Context, handler TopicHandler) error {
 	return defaultConsumer.Subscribe(ctx, handler)
 }
 
-// SubscribeWithTopicHandler 订阅消息并支持按主题分发处理（使用默认消费者）
-func SubscribeWithTopicHandler(ctx context.Context, handler TopicHandler) error {
-	if defaultConsumer == nil {
-		return fmt.Errorf("kafka consumer not initialized")
-	}
-	return defaultConsumer.SubscribeWithTopicHandler(ctx, handler)
-}
-
 // Subscribe 订阅消息
 func (c *Consumer) Subscribe(ctx context.Context, handler TopicHandler) error {
 	c.log.Info("开始订阅Kafka消息...")
@@ -129,47 +117,11 @@ func (c *Consumer) Subscribe(ctx context.Context, handler TopicHandler) error {
 			// 创建消息上下文
 			msgCtx := &MessageContext{
 				Message:   msg,
-				Retry:     0,
-				MaxRetry:  c.config.MaxRetries,
 				ShouldAck: !c.config.AutoCommit, // 非自动提交模式下需要手动确认
 			}
 
 			// 异步处理消息
-			go func(mCtx *MessageContext) {
-				c.processMessageWithRetry(ctx, mCtx, handler)
-			}(msgCtx)
-		}
-	}
-}
-
-// SubscribeWithTopicHandler 订阅消息并支持按主题分发处理
-func (c *Consumer) SubscribeWithTopicHandler(ctx context.Context, handler TopicHandler) error {
-	c.log.Info("开始订阅Kafka消息（支持主题分发）...")
-
-	for {
-		select {
-		case <-ctx.Done():
-			c.log.Info("Kafka消费者停止")
-			return ctx.Err()
-		default:
-			msg, err := c.reader.ReadMessage(ctx)
-			if err != nil {
-				c.log.Errorf("Kafka读取消息失败: %v", err)
-				continue
-			}
-
-			// 创建消息上下文
-			msgCtx := &MessageContext{
-				Message:   msg,
-				Retry:     0,
-				MaxRetry:  c.config.MaxRetries,
-				ShouldAck: !c.config.AutoCommit, // 非自动提交模式下需要手动确认
-			}
-
-			// 异步处理消息，传入主题信息
-			go func(mCtx *MessageContext) {
-				c.processMessageWithRetry(ctx, mCtx, handler)
-			}(msgCtx)
+			go c.processMessage(ctx, msgCtx, handler)
 		}
 	}
 }
@@ -185,68 +137,26 @@ func (c *Consumer) Close() {
 	}
 }
 
-// processMessageWithRetry 带重试的消息处理
-func (c *Consumer) processMessageWithRetry(ctx context.Context, msgCtx *MessageContext, handler TopicHandler) {
-	var lastErr error
+// processMessage 带重试的消息处理
+func (c *Consumer) processMessage(ctx context.Context, msgCtx *MessageContext, handler TopicHandler) {
 
-	for attempt := 0; attempt <= msgCtx.MaxRetry; attempt++ {
-		msgCtx.Retry = attempt
+	// 创建带超时的上下文
+	processCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// 执行消息处理
+	err := handler(processCtx, msgCtx.Message.Topic, msgCtx.Message)
+	cancel()
 
-		// 创建带超时的上下文
-		processCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-
-		// 执行消息处理
-		err := handler(processCtx, msgCtx.Message.Topic, msgCtx.Message)
-		cancel()
-
-		if err == nil {
-			// 处理成功，提交offset
-			if !c.config.AutoCommit && msgCtx.ShouldAck {
-				if commitErr := c.commitMessage(msgCtx.Message); commitErr != nil {
-					c.log.Errorf("提交offset失败: topic=%s, partition=%d, offset=%d, err=%v",
-						msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, commitErr)
-					return
-				}
-				c.log.Debugf("消息处理成功并已确认: topic=%s, partition=%d, offset=%d",
-					msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset)
-			}
-			return
-		}
-
-		lastErr = err
-		c.log.Warnf("消息处理失败 (尝试 %d/%d): topic=%s, partition=%d, offset=%d, err=%v",
-			attempt+1, msgCtx.MaxRetry+1,
-			msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, err)
-
-		// 如果还有重试机会，等待后重试
-		if attempt < msgCtx.MaxRetry {
-			backoff := c.getRetryBackoff(attempt)
-			c.log.Infof("等待 %v 后重试...", backoff)
-
-			select {
-			case <-ctx.Done():
-				c.log.Info("取消重试，上下文已结束")
-				return
-			case <-time.After(backoff):
-				// 继续重试
-			}
-		}
+	if err != nil {
+		c.log.Errorf("消息处理失败: topic=%s, partition=%d, offset=%d, last_err=%v", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, err)
 	}
 
-	// 所有重试都失败了
-	c.log.Errorf("消息处理最终失败，已达最大重试次数: topic=%s, partition=%d, offset=%d, last_err=%v",
-		msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, lastErr)
-
-	// 即使失败，如果不是自动提交模式，也需要提交offset以避免阻塞
-	// 业务方可以通过配置决定是否要跳过失败的message
-	if !c.config.AutoCommit && msgCtx.ShouldAck {
+	// 处理成功，提交offset
+	if msgCtx.ShouldAck {
 		if commitErr := c.commitMessage(msgCtx.Message); commitErr != nil {
-			c.log.Errorf("提交失败消息的offset失败: topic=%s, partition=%d, offset=%d, err=%v",
-				msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, commitErr)
-		} else {
-			c.log.Warnf("已跳过失败的消息: topic=%s, partition=%d, offset=%d",
-				msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset)
+			c.log.Errorf("提交offset失败: topic=%s, partition=%d, offset=%d, err=%v", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset, commitErr)
+			return
 		}
+		c.log.Debugf("消息处理成功并已确认: topic=%s, partition=%d, offset=%d", msgCtx.Message.Topic, msgCtx.Message.Partition, msgCtx.Message.Offset)
 	}
 }
 
@@ -298,36 +208,12 @@ func (c *Consumer) GetReader() *kafka.Reader {
 	return c.reader
 }
 
-// setConsumerDefaults 设置消费者默认值
-func setConsumerDefaults(config *Config) {
-	if config.MinBytes == 0 {
-		config.MinBytes = 1
-	}
-	if config.MaxBytes == 0 {
-		config.MaxBytes = 1048576 // 1MB
-	}
-	if config.QueueCapacity == 0 {
-		config.QueueCapacity = 1000
-	}
-	if config.MaxRetries == 0 {
-		config.MaxRetries = 3 // 默认重试3次
-	}
-	if config.RetryBackoff == 0 {
-		config.RetryBackoff = 1 * time.Second // 默认退避1秒
-	}
-	// AutoCommit 默认为 false，推荐手动提交
-	// CommitInterval 默认为 0，表示不使用自动提交
-	if config.StartOffset == 0 {
-		config.StartOffset = kafka.FirstOffset // 默认从最早的消息开始消费
-	}
-}
-
 // getStartOffset 获取起始offset
 func getStartOffset(offset int64) int64 {
-	if offset == kafka.FirstOffset || offset == -2 {
+	if offset == -2 {
 		return kafka.FirstOffset
 	}
-	if offset == kafka.LastOffset || offset == -1 {
+	if offset == -1 {
 		return kafka.LastOffset
 	}
 	// 默认从最早开始

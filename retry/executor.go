@@ -28,7 +28,7 @@ type Attempt struct {
 type Task func(ctx context.Context) (any, error)
 
 // Callback 重试完成回调
-type Callback func(result *Result, arg ...any)
+type Callback func(result *Result, args ...any)
 
 // Executor 重试执行器
 type Executor struct {
@@ -60,7 +60,7 @@ func (e *Executor) SetCallback(callback Callback) {
 }
 
 // Execute 非阻塞执行重试任务
-func (e *Executor) Execute(task Task, arg ...any) <-chan *Result {
+func (e *Executor) Execute(task Task, args ...any) <-chan *Result {
 	resultChan := make(chan *Result, 1)
 
 	go func() {
@@ -71,7 +71,7 @@ func (e *Executor) Execute(task Task, arg ...any) <-chan *Result {
 
 		// 触发回调
 		if e.callback != nil {
-			e.callback(result, arg...)
+			e.callback(result, args...)
 		}
 	}()
 
@@ -179,7 +179,7 @@ func (e *Executor) isRetryableError(err error) bool {
 }
 
 // ExecuteSync 同步执行重试任务(阻塞)
-func (e *Executor) ExecuteSync(task Task, arg ...any) *Result {
-	resultChan := e.Execute(task, arg)
+func (e *Executor) ExecuteSync(task Task, args ...any) *Result {
+	resultChan := e.Execute(task, args)
 	return <-resultChan
 }

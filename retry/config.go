@@ -5,13 +5,16 @@ import (
 	"time"
 )
 
+// IsRetryableFunc 判断错误是否可重试的函数类型
+type IsRetryableFunc func(err error) bool
+
 // Config 重试配置
 type Config struct {
-	MaxRetries      int             // 最大重试次数
-	Strategy        Strategy        // 重试策略
-	Timeout         time.Duration   // 单次执行超时时间
-	RetryableErrors []error         // 可重试的错误列表(为空则全部重试)
-	Context         context.Context // 上下文(用于取消)
+	MaxRetries  int             // 最大重试次数
+	Strategy    Strategy        // 重试策略
+	Timeout     time.Duration   // 单次执行超时时间
+	IsRetryable IsRetryableFunc // 自定义错误重试判断函数(为空则全部重试)
+	Context     context.Context // 上下文(用于取消)
 }
 
 // DefaultRetryConfig 返回默认重试配置

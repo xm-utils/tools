@@ -9,7 +9,7 @@
 - ✅ **非阻塞执行** - 基于 goroutine 异步执行，不阻塞主线程
 - ✅ **多种重试策略** - 固定间隔、指数退避、线性退避
 - ✅ **批量并发处理** - 支持协程池控制并发，分批处理大量任务
-- ✅ **灵活配置** - 超时控制、错误过滤、上下文取消
+- ✅ **灵活配置** - 超时控制、自定义错误判断、上下文取消
 - ✅ **完善回调** - 支持重试完成回调、进度回调
 - ✅ **详细监控** - 记录每次重试的耗时、延迟、错误信息
 - ✅ **同步/异步双模式** - 支持 Execute (异步) 和 ExecuteSync (同步)
@@ -171,7 +171,9 @@ task := func(ctx context.Context) (interface{}, error) {
 // 只重试特定错误
 var ErrDeadlock = errors.New("deadlock detected")
 config := retry.DefaultRetryConfig()
-config.RetryableErrors = []error{ErrDeadlock}
+config.IsRetryable = func(err error) bool {
+    return err == ErrDeadlock
+}
 
 executor := retry.NewRetryExecutor(config)
 executor.Execute(task)
@@ -248,6 +250,57 @@ go func() {
 
 ## 🔧 配置说明
 
+### IsRetryableFunc 自定义错误判断函数
+
+`IsRetryableFunc` 是一个函数类型，用于自定义判断错误是否可重试：
+
+```go
+type IsRetryableFunc func(err error) bool
+```
+
+**使用示例：**
+
+```go
+// 示例1: 基于错误值判断
+config.IsRetryable = func(err error) bool {
+    return err == ErrTimeout || err == ErrNetwork
+}
+
+// 示例2: 基于错误类型判断
+config.IsRetryable = func(err error) bool {
+    _, ok := err.(*TimeoutError)
+    return ok
+}
+
+// 示例3: 基于HTTP状态码判断
+config.IsRetryable = func(err error) bool {
+    if httpErr, ok := err.(*HTTPError); ok {
+        return httpErr.StatusCode >= 500 // 只重试服务器错误
+    }
+    return false
+}
+
+// 示例4: 结合业务逻辑判断
+config.IsRetryable = func(err error) bool {
+    if bizErr, ok := err.(*BusinessError); ok {
+        switch bizErr.Code {
+        case "SYSTEM_BUSY", "SERVICE_UNAVAILABLE":
+            return true  // 系统繁忙，可重试
+        case "INVALID_PARAM", "AUTH_FAILED":
+            return false // 参数错误或认证失败，不重试
+        default:
+            return false
+        }
+    }
+    return false
+}
+```
+
+**注意事项：**
+- 如果未设置 `IsRetryable`，默认所有错误都可重试
+- 建议明确指定可重试的错误，避免不必要的重试
+- 区分临时错误（网络超时、服务器错误）和永久错误（参数错误、认证失败）
+
 ### Config (单个任务重试配置)
 
 | 字段 | 类型 | 默认值 | 说明 |
@@ -255,7 +308,7 @@ go func() {
 | MaxRetries | int | 5 | 最大重试次数 |
 | Strategy | Strategy | ExponentialBackoff | 重试策略 |
 | Timeout | time.Duration | 10s | 单次执行超时 |
-| RetryableErrors | []error | nil(全部重试) | 可重试的错误列表 |
+| IsRetryable | IsRetryableFunc | nil(全部重试) | 自定义错误重试判断函数 |
 | Context | context.Context | background | 上下文(用于取消) |
 
 ### BatchRetryConfig (批量重试配置)
@@ -334,15 +387,36 @@ type BatchResult struct {
 config.Timeout = 10 * time.Second  // 根据业务调整
 ```
 
-### 3. 过滤不可重试的错误
+### 3. 自定义错误重试判断
 
 ```go
 var ErrInvalidData = errors.New("invalid data")
+var ErrTimeout = errors.New("timeout")
+var ErrNetwork = errors.New("network error")
 
-config.RetryableErrors = []error{
-    ErrTimeout,
-    ErrNetwork,
-    // 不包含 ErrInvalidData,因为数据错误重试无意义
+// 方式1: 简单判断
+config.IsRetryable = func(err error) bool {
+    return err == ErrTimeout || err == ErrNetwork
+}
+
+// 方式2: 复杂判断
+config.IsRetryable = func(err error) bool {
+    // 超时和网络错误可重试
+    if errors.Is(err, ErrTimeout) || errors.Is(err, ErrNetwork) {
+        return true
+    }
+    
+    // HTTP 5xx 错误可重试
+    if httpErr, ok := err.(*HTTPError); ok && httpErr.StatusCode >= 500 {
+        return true
+    }
+    
+    // 客户端错误不重试
+    if httpErr, ok := err.(*HTTPError); ok && httpErr.StatusCode < 500 {
+        return false
+    }
+    
+    return false
 }
 ```
 

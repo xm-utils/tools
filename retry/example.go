@@ -95,7 +95,7 @@ func ExampleWithErrorFiltering() {
 	// 定义可重试和不可重试的错误
 	var ErrTimeout = errors.New("timeout")
 	var ErrNetwork = errors.New("network error")
-	// 不可重试
+	var ErrInvalidParam = errors.New("invalid parameter") // 不可重试
 
 	task := func(ctx context.Context) (interface{}, error) {
 		// 模拟业务逻辑
@@ -103,7 +103,10 @@ func ExampleWithErrorFiltering() {
 	}
 
 	config := DefaultRetryConfig()
-	config.RetryableErrors = []error{ErrTimeout, ErrNetwork} // 只重试这些错误
+	// 自定义判断函数:只重试超时和网络错误
+	config.IsRetryable = func(err error) bool {
+		return err == ErrTimeout || err == ErrNetwork
+	}
 
 	executor := NewRetryExecutor(config)
 	resultChan := executor.Execute(task, nil)
@@ -115,6 +118,64 @@ func ExampleWithErrorFiltering() {
 			logrus.Errorf("失败原因: %v", result.Error)
 		}
 	}()
+}
+
+// ExampleWithCustomRetryLogic 自定义重试逻辑示例
+func ExampleWithCustomRetryLogic() {
+	task := func(ctx context.Context) (interface{}, error) {
+		// 模拟HTTP请求
+		return nil, errors.New("503 Service Unavailable")
+	}
+
+	config := DefaultRetryConfig()
+
+	// 自定义复杂的重试判断逻辑
+	config.IsRetryable = func(err error) bool {
+		// 根据错误消息判断
+		errMsg := err.Error()
+
+		// 服务器错误可重试
+		if contains(errMsg, "500") || contains(errMsg, "502") || contains(errMsg, "503") {
+			return true
+		}
+
+		// 网络超时可重试
+		if contains(errMsg, "timeout") || contains(errMsg, "connection refused") {
+			return true
+		}
+
+		// 客户端错误不重试
+		if contains(errMsg, "400") || contains(errMsg, "401") || contains(errMsg, "404") {
+			return false
+		}
+
+		// 默认不重试
+		return false
+	}
+
+	executor := NewRetryExecutor(config)
+	resultChan := executor.Execute(task, nil)
+
+	go func() {
+		result := <-resultChan
+		logrus.Infof("任务完成: success=%v, attempts=%d", result.Success, result.Attempts)
+	}()
+}
+
+// contains 辅助函数
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && s != "" && substr != "" &&
+		(s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			findSubstring(s, substr)))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
 
 // ExampleWithTimeout 带超时控制的示例

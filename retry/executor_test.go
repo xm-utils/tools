@@ -185,7 +185,10 @@ func TestRetryExecutor_WithErrorFiltering(t *testing.T) {
 
 	config := DefaultRetryConfig()
 	config.MaxRetries = 2
-	config.RetryableErrors = []error{ErrRetryable}
+	// 自定义判断函数:只重试ErrRetryable
+	config.IsRetryable = func(err error) bool {
+		return err == ErrRetryable
+	}
 	config.Strategy = &FixedRetryStrategy{Interval: 100 * time.Millisecond}
 
 	executor := NewRetryExecutor(config)

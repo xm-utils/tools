@@ -163,19 +163,13 @@ func (e *Executor) executeWithRetry(task Task) *Result {
 
 // isRetryableError 检查错误是否可重试
 func (e *Executor) isRetryableError(err error) bool {
-	// 如果没有指定可重试错误列表,则全部重试
-	if len(e.config.RetryableErrors) == 0 {
+	// 如果未提供自定义判断函数,默认全部可重试
+	if e.config.IsRetryable == nil {
 		return true
 	}
 
-	// 检查错误是否在可重试列表中
-	for _, retryableErr := range e.config.RetryableErrors {
-		if err == retryableErr {
-			return true
-		}
-	}
-
-	return false
+	// 使用自定义判断函数
+	return e.config.IsRetryable(err)
 }
 
 // ExecuteSync 同步执行重试任务(阻塞)

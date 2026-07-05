@@ -95,7 +95,7 @@ func ExampleWithErrorFiltering() {
 	// 定义可重试和不可重试的错误
 	var ErrTimeout = errors.New("timeout")
 	var ErrNetwork = errors.New("network error")
-	var ErrInvalidParam = errors.New("invalid parameter") // 不可重试
+	//var ErrInvalidParam = errors.New("invalid parameter") // 不可重试
 
 	task := func(ctx context.Context) (interface{}, error) {
 		// 模拟业务逻辑

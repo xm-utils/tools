@@ -29,6 +29,13 @@
   - [API 参考](#api-参考-1)
   - [最佳实践](#最佳实践-1)
   - [常见问题](#常见问题-1)
+- [多协程处理方案](#多协程处理方案)
+  - [传统 Subscribe 模式](#传统-subscribe-模式)
+  - [WorkerPool 模式](#workerpool-模式)
+  - [配置说明](#配置说明-1)
+  - [性能对比](#性能对比)
+  - [使用示例](#使用示例-1)
+  - [最佳实践](#最佳实践-2)
 - [高级功能](#高级功能)
   - [消息去重](#消息去重)
   - [内存去重存储](#内存去重存储)
@@ -64,6 +71,7 @@
 - ✅ **消息去重**：内置消息去重机制，支持内存和 Redis 两种存储方式
 - ✅ **批量处理**：支持批量消息发送，提高吞吐量
 - ✅ **异步处理**：消费者采用异步处理方式，提高并发能力
+- ✅ **多协程处理**：支持传统模式和 WorkerPool 模式，灵活控制并发度
 - ✅ **优雅退出**：支持 context 控制的优雅关闭
 - ✅ **日志集成**：集成 logrus，提供详细的运行日志
 - ✅ **默认值优化**：合理的默认配置，开箱即用
@@ -733,6 +741,363 @@ realtimeConfig.GroupID = "realtime-group"       // 用于实时推送
 | 适用场景 | 简单应用 | 生产环境推荐 |
 
 **推荐：** 在生产环境中始终使用 ConsumerManager 管理多个独立的消费者实例。
+
+## 🚀 多协程处理方案
+
+Kafka 消费者提供了两种消息处理模式，可以根据业务需求选择合适的并发处理方式。
+
+### 传统 Subscribe 模式
+
+这是默认的消息处理方式，每条消息启动一个独立的 goroutine 进行处理。
+
+#### 架构设计
+
+```
+┌─────────────┐
+│  Kafka      │
+│  Reader     │
+└──────┬──────┘
+       │
+       ├─→ goroutine 1 → handler(msg1)
+       ├─→ goroutine 2 → handler(msg2)
+       ├─→ goroutine 3 → handler(msg3)
+       └─→ ... (无限制)
+```
+
+#### 特点
+
+- ✅ 每条消息启动一个新的 goroutine
+- ✅ 实现简单，无需额外配置
+- ✅ 无队列阻塞风险
+- ❌ 高并发时 goroutine 数量不可控
+- ❌ 可能导致系统资源耗尽
+
+#### 使用示例
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/segmentio/kafka-go"
+    "github.com/xm-utils/tools/kafka"
+)
+
+func main() {
+    // 配置消费者
+    config := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers: []string{"localhost:9092"},
+        },
+        Topic:      "test-topic",
+        GroupID:    "test-group",
+        AutoCommit: false,
+    }
+    
+    // 初始化消费者
+    if err := kafka.InitConsumer(config); err != nil {
+        panic(err)
+    }
+    
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    
+    // 定义消息处理器
+    handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+        fmt.Printf("收到消息: %s\n", string(msg.Value))
+        
+        // 业务处理逻辑
+        time.Sleep(100 * time.Millisecond)
+        
+        return nil // 返回nil表示成功，自动提交offset
+    }
+    
+    // 订阅消息（每条消息一个goroutine）
+    if err := kafka.Subscribe(ctx, handler); err != nil {
+        fmt.Printf("订阅失败: %v\n", err)
+    }
+}
+```
+
+### WorkerPool 模式
+
+WorkerPool 模式使用固定数量的 worker 协程从任务队列中取任务处理，提供更好的资源控制能力。
+
+#### 架构设计
+
+```
+┌─────────────┐     ┌──────────────┐
+│  Kafka      │     │  Task Queue  │
+│  Reader     │────▶│  (buffered)  │
+└─────────────┘     └──────┬───────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         Worker 1     Worker 2     Worker N
+              │            │            │
+              └────────────┴────────────┘
+                           │
+                      handler(msg)
+```
+
+#### 特点
+
+- ✅ 固定数量的 worker 协程
+- ✅ 任务通过 channel 队列分发
+- ✅ 支持背压（队列满时拒绝新任务）
+- ✅ 资源使用可控
+- ❌ 实现稍复杂
+- ❌ 队列满时会丢弃消息
+
+#### 使用示例
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "time"
+    
+    "github.com/segmentio/kafka-go"
+    "github.com/xm-utils/tools/kafka"
+)
+
+func main() {
+    // 配置消费者
+    config := &kafka.ConsumerConfig{
+        CommonConfig: kafka.CommonConfig{
+            Brokers: []string{"localhost:9092"},
+        },
+        Topic:      "test-topic",
+        GroupID:    "test-group-pool",
+        AutoCommit: false,
+    }
+    
+    // 初始化消费者
+    if err := kafka.InitConsumer(config); err != nil {
+        panic(err)
+    }
+    
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+    
+    // 定义消息处理器
+    handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+        fmt.Printf("收到消息: %s\n", string(msg.Value))
+        
+        // 业务处理逻辑
+        time.Sleep(100 * time.Millisecond)
+        
+        return nil // 返回nil表示成功，自动提交offset
+    }
+    
+    // 配置WorkerPool
+    poolConfig := &kafka.WorkerPoolConfig{
+        WorkerCount: 10,                // 10个worker协程
+        QueueSize:   1000,              // 队列容量1000
+        Timeout:     30 * time.Second,  // 单个任务超时30秒
+    }
+    
+    // 订阅消息（使用WorkerPool）
+    if err := kafka.SubscribeWithWorkerPool(ctx, handler, poolConfig); err != nil {
+        fmt.Printf("订阅失败: %v\n", err)
+    }
+}
+```
+
+#### 监控 WorkerPool 状态
+
+```go
+// 获取消费者实例
+consumer := kafka.GetConsumer()
+
+// 定期监控队列长度
+go func() {
+    ticker := time.NewTicker(5 * time.Second)
+    defer ticker.Stop()
+    
+    for {
+        select {
+        case <-ctx.Done():
+            return
+        case <-ticker.C:
+            if consumer.workerPool != nil {
+                queueLen := consumer.workerPool.GetQueueLength()
+                fmt.Printf("WorkerPool队列长度: %d\n", queueLen)
+                
+                // 如果队列持续接近满载，考虑增加WorkerCount或QueueSize
+                if queueLen > 800 { // 队列容量的80%
+                    fmt.Println("警告: WorkerPool队列接近满载!")
+                }
+            }
+        }
+    }
+}()
+```
+
+### 配置说明
+
+#### WorkerPoolConfig
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| WorkerCount | int | 10 | Worker协程数量，建议设置为CPU核心数的2-4倍 |
+| QueueSize | int | 1000 | 任务队列大小，根据内存和消息处理速度调整 |
+| Timeout | time.Duration | 30s | 单个任务处理超时时间 |
+
+#### WorkerCount 选择建议
+
+- **低流量场景** (< 100 msg/s): 5-10 个 worker
+- **中流量场景** (100-1000 msg/s): 10-20 个 worker
+- **高流量场景** (> 1000 msg/s): 20-50 个 worker
+- **CPU密集型处理**: 设置为 CPU 核心数
+- **IO密集型处理**: 设置为 CPU 核心数的 2-4 倍
+
+#### QueueSize 选择建议
+
+- **小队列** (100-500): 快速失败，适合对延迟敏感的场景
+- **中等队列** (500-2000): 平衡性能和资源使用
+- **大队列** (2000+): 提高吞吐量，但会增加内存使用和延迟
+
+**注意**: 队列满时会丢弃新消息并记录警告日志。如果需要确保不丢消息，应该：
+1. 增加 `QueueSize`
+2. 增加 `WorkerCount`
+3. 优化消息处理速度
+
+### 性能对比
+
+#### 传统 Subscribe 模式
+
+**优点：**
+- ✅ 实现简单，易于理解
+- ✅ 无队列阻塞风险
+- ✅ 消息不会因队列满而丢失
+- ✅ 适合低至中等流量场景
+
+**缺点：**
+- ❌ 高并发时 goroutine 数量不可控
+- ❌ 可能导致系统资源耗尽
+- ❌ 无法有效控制并发度
+- ❌ 消息处理顺序完全无序
+
+#### WorkerPool 模式
+
+**优点：**
+- ✅ 协程数量可控，资源使用可预测
+- ✅ 支持背压机制，防止系统过载
+- ✅ 可以精确控制并发度
+- ✅ 适合高流量场景
+- ✅ 更好的资源利用率
+
+**缺点：**
+- ❌ 实现稍复杂
+- ❌ 队列满时会丢弃消息
+- ❌ 需要合理配置参数
+- ❌ 消息处理顺序完全无序
+
+### 最佳实践
+
+#### 1. 选择合适的模式
+
+```
+消息量 < 1000/s 且 处理时间短 → 传统 Subscribe 模式
+消息量 >= 1000/s 或 处理时间长 → WorkerPool 模式
+```
+
+#### 2. 错误处理
+
+```go
+handler := func(ctx context.Context, topic string, msg kafka.Message) error {
+    // 业务逻辑
+    err := processBusiness(msg.Value)
+    
+    if err != nil {
+        // 返回错误，offset不会提交，消息会被重新消费
+        log.Errorf("处理失败: %v", err)
+        return err
+    }
+    
+    // 成功则返回nil，offset会自动提交
+    return nil
+}
+```
+
+#### 3. 优雅关闭
+
+```go
+// Close() 会自动停止 WorkerPool
+defer consumer.Close()
+
+// 或者手动控制
+cancel() // 停止消息读取
+time.Sleep(1 * time.Second) // 等待正在处理的消息完成
+consumer.Close() // 停止 WorkerPool 和 Reader
+```
+
+#### 4. 监控和告警
+
+```go
+// 监控指标
+- WorkerPool 队列长度
+- 消息处理耗时
+- 错误率
+- Worker 活跃度
+
+// 告警阈值
+- 队列长度 > 80% 容量
+- 平均处理时间 > 预期值
+- 错误率 > 5%
+```
+
+#### 5. 调优步骤
+
+1. **基准测试**: 测量当前配置下的吞吐量
+2. **监控瓶颈**: 观察队列长度和处理时间
+3. **调整 WorkerCount**: 如果队列经常满载，增加 worker 数量
+4. **调整 QueueSize**: 如果频繁出现队列满警告，增加队列大小
+5. **优化 Handler**: 减少单个消息的处理时间
+6. **重复测试**: 验证调整效果
+
+### 常见问题
+
+#### Q1: WorkerPool 队列满了怎么办？
+
+**A:** 队列满时会丢弃新消息并记录警告日志。解决方案：
+- 增加 `QueueSize`
+- 增加 `WorkerCount`
+- 优化消息处理逻辑，提高处理速度
+
+#### Q2: 如何保证消息不丢失？
+
+**A:** 
+- 使用 `AutoCommit: false`（手动提交）
+- 在 handler 中正确处理错误
+- 监控队列长度，避免队列满导致丢消息
+- 考虑使用死信队列处理失败消息
+
+#### Q3: WorkerCount 设置多少合适？
+
+**A:** 
+- CPU 密集型任务: CPU 核心数
+- IO 密集型任务: CPU 核心数 × 2-4
+- 混合型任务: CPU 核心数 × 1.5-2
+- 通过监控和压测找到最优值
+
+#### Q4: 两种模式可以混用吗？
+
+**A:** 不建议。同一个 Consumer 实例只能使用一种模式。如果需要切换，应该创建新的 Consumer 实例。
+
+### 总结
+
+- **传统 Subscribe 模式** 适合简单场景和低流量应用
+- **WorkerPool 模式** 适合高流量、需要控制资源的场景
+- 根据实际业务需求选择合适的模式
+- 通过监控和调优获得最佳性能
+- 始终做好错误处理和优雅关闭
 
 ## 🔧 高级功能
 

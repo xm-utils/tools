@@ -21,7 +21,7 @@ const (
 	RoutinePoolPriority
 	LogPriority
 	CronPriority
-	GrpcServerPriority //grpc server 優先關閉避免request不斷進來
+	GrpcServerPriority //grpc server
 	HttpServerShutdownPriority
 )
 
@@ -61,6 +61,25 @@ func (imp *ImplementShutdown) Name() string {
 
 func (imp *ImplementShutdown) ShutdownPriority() int {
 	return imp.Priority
+}
+
+type CustomHook struct {
+	ImplementShutdown
+	Shutdown func()
+}
+
+func NewCustomHook(eventName string, priority int, shutdown func()) *CustomHook {
+	return &CustomHook{
+		ImplementShutdown: ImplementShutdown{
+			Priority:  priority,
+			EventName: eventName,
+		},
+		Shutdown: shutdown,
+	}
+}
+
+func (imp *CustomHook) BeforeShutdown() {
+	imp.Shutdown()
 }
 
 // Shutdown /应用

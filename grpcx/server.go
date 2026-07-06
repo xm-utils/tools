@@ -33,6 +33,10 @@ type Server struct {
 
 func NewServer(servers []IServer) *Server {
 	s := &Server{
+		ImplementShutdown: ImplementShutdown{
+			Priority:  GrpcServerPriority,
+			EventName: "multi-server",
+		},
 		servers: servers,
 		log:     logrus.WithField("model", "GatewayGrpcServer"),
 	}
@@ -114,7 +118,7 @@ type HTTPServer struct {
 	server *http.Server
 }
 
-func NewHTTPServer(name, addr string, priority int, httpSetup func(engine *gin.Engine)) *HTTPServer {
+func NewHTTPServer(name, addr string, httpSetup func(engine *gin.Engine)) *HTTPServer {
 	handler := gin.Default()
 	httpSetup(handler)
 	srv := &http.Server{
@@ -123,7 +127,7 @@ func NewHTTPServer(name, addr string, priority int, httpSetup func(engine *gin.E
 	}
 	s := &HTTPServer{
 		ImplementShutdown: ImplementShutdown{
-			Priority:  priority,
+			Priority:  HttpServerShutdownPriority,
 			EventName: name,
 		},
 		addr:   addr,
@@ -132,8 +136,8 @@ func NewHTTPServer(name, addr string, priority int, httpSetup func(engine *gin.E
 	return s
 }
 
-func WithHTTPServer(name, addr string, priority int, httpSetup func(engine *gin.Engine)) IServer {
-	return NewHTTPServer(name, addr, priority, httpSetup)
+func WithHTTPServer(name, addr string, httpSetup func(engine *gin.Engine)) IServer {
+	return NewHTTPServer(name, addr, httpSetup)
 }
 
 func (s *HTTPServer) Start() error {
@@ -168,7 +172,7 @@ type GrpcServer struct {
 	server *grpc.Server
 }
 
-func NewGrpcServer(name, addr string, priority int, register ServiceRegister, opts ...grpc.ServerOption) *GrpcServer {
+func NewGrpcServer(name, addr string, register ServiceRegister, opts ...grpc.ServerOption) *GrpcServer {
 
 	s := &GrpcServer{
 		server: grpc.NewServer(opts...),
@@ -176,7 +180,7 @@ func NewGrpcServer(name, addr string, priority int, register ServiceRegister, op
 
 	s.addr = addr
 	s.ImplementShutdown = ImplementShutdown{
-		Priority:  priority,
+		Priority:  GrpcServerPriority,
 		EventName: name,
 	}
 
@@ -185,8 +189,8 @@ func NewGrpcServer(name, addr string, priority int, register ServiceRegister, op
 	return s
 }
 
-func WithGrpcServer(name, addr string, priority int, register ServiceRegister, opts ...grpc.ServerOption) IServer {
-	return NewGrpcServer(name, addr, priority, register, opts...)
+func WithGrpcServer(name, addr string, register ServiceRegister, opts ...grpc.ServerOption) IServer {
+	return NewGrpcServer(name, addr, register, opts...)
 }
 
 func (s *GrpcServer) Start() error {

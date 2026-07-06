@@ -9,13 +9,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-var (
-	defaultProducer *Producer
-)
-
-// TopicHandler 主题特定的消息处理函数
-type TopicHandler func(ctx context.Context, topic string, msg kafka.Message) error
-
 // Producer Kafka生产者
 type Producer struct {
 	writer *kafka.Writer
@@ -23,16 +16,7 @@ type Producer struct {
 	config *ProducerConfig
 }
 
-// InitProducer 初始化生产者
-func InitProducer(config *ProducerConfig) error {
-	if config == nil {
-		return fmt.Errorf("kafka config is nil")
-	}
-
-	if len(config.Brokers) == 0 {
-		return fmt.Errorf("kafka brokers is empty")
-	}
-
+func NewProducer(config *ProducerConfig) *Producer {
 	log := logrus.WithField("module", "Kafka Producer")
 
 	writer := &kafka.Writer{
@@ -53,28 +37,12 @@ func InitProducer(config *ProducerConfig) error {
 		},
 	}
 
-	defaultProducer = &Producer{
+	log.Infof("Kafka生产者初始化成功: brokers=%v, topic=%s", config.Brokers, config.Topic)
+	return &Producer{
 		writer: writer,
 		log:    log,
 		config: config,
 	}
-
-	log.Infof("Kafka生产者初始化成功: brokers=%v, topic=%s", config.Brokers, config.Topic)
-	return nil
-}
-
-// GetProducer 获取默认生产者
-func GetProducer() *Producer {
-	return defaultProducer
-}
-
-// Publish 发布消息（使用默认生产者）
-func Publish(ctx context.Context, topic string, key string, value []byte) error {
-	if defaultProducer == nil {
-		return fmt.Errorf("kafka producer not initialized")
-	}
-
-	return defaultProducer.Publish(ctx, topic, key, value)
 }
 
 // Publish 发布消息

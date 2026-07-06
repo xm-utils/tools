@@ -1,10 +1,14 @@
 package kafka
 
 import (
+	"context"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
+
+// TopicHandler 主题特定的消息处理函数
+type TopicHandler func(ctx context.Context, topic string, msg kafka.Message) error
 
 // CommonConfig Kafka通用配置（生产者和消费者共用）
 type CommonConfig struct {

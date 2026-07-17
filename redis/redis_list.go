@@ -7,11 +7,7 @@ import (
 
 // BLPop 1	BLPOP key1 [key2... ] timeout 移出并获取列表的第一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。
 func BLPop[T any](ctx context.Context, timeout int, keys ...string) (k string, v T, err error) {
-	kArr := make([]string, len(keys))
-	for i, val := range keys {
-		kArr[i] = associate(val)
-	}
-	cmd := client.BLPop(ctx, time.Duration(timeout)*time.Second, kArr...)
+	cmd := client.BLPop(ctx, time.Duration(timeout)*time.Second, associateKeys(keys...)...)
 	if cmd.Err() != nil {
 		err = cmd.Err()
 		return
@@ -23,11 +19,7 @@ func BLPop[T any](ctx context.Context, timeout int, keys ...string) (k string, v
 
 // BRPop 2	BRPOP key1 [key2 ] timeout 移出并获取列表的最后一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。
 func BRPop[T any](ctx context.Context, timeout int, keys ...string) (k string, v T, err error) {
-	kArr := make([]string, len(keys))
-	for i, val := range keys {
-		kArr[i] = associate(val)
-	}
-	cmd := client.BRPop(ctx, time.Duration(timeout)*time.Second, kArr...)
+	cmd := client.BRPop(ctx, time.Duration(timeout)*time.Second, associateKeys(keys...)...)
 	if cmd.Err() != nil {
 		err = cmd.Err()
 		return

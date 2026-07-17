@@ -44,6 +44,14 @@ func associate(originKey interface{}) string {
 	return fmt.Sprintf("%s:%s", Key, originKey)
 }
 
+func associateKeys(originKey ...string) []string {
+	keys := make([]string, len(originKey))
+	for i, k := range originKey {
+		keys[i] = fmt.Sprintf("%s:%s", Key, k)
+	}
+	return keys
+}
+
 // start gc routine based on config string settings.
 func startAndGC(host, passWord string, dbNum int) (*redis.Client, error) {
 
@@ -116,7 +124,7 @@ func Eval(ctx context.Context, script string, keys []string, args ...interface{}
 		prefixedKeys[i] = associate(k)
 	}
 
-	cmd := client.Eval(ctx, script, prefixedKeys, args...)
+	cmd := client.Eval(ctx, script, associateKeys(keys...), args...)
 	if cmd.Err() != nil {
 		return nil, cmd.Err()
 	}

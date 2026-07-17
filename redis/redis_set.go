@@ -24,7 +24,7 @@ func SCard(ctx context.Context, key string) int64 {
 
 // SDiff 3	SDIFF key1 [key2] 返回第一个集合与其他集合之间的差异。
 func SDiff[T any](ctx context.Context, keys ...string) (res []T, err error) {
-	cmd := client.SDiff(ctx, keys...)
+	cmd := client.SDiff(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
 		return nil, err
 	}
@@ -33,13 +33,13 @@ func SDiff[T any](ctx context.Context, keys ...string) (res []T, err error) {
 
 // SDiffStore 4	SDIFFSTORE destination key1 [key2] 返回给定所有集合的差集并存储在 destination 中
 func SDiffStore(ctx context.Context, destination string, keys ...string) (int64, error) {
-	cmd := client.SDiffStore(ctx, associate(destination), keys...)
+	cmd := client.SDiffStore(ctx, associate(destination), associateKeys(keys...)...)
 	return cmd.Val(), cmd.Err()
 }
 
 // SInter 5	SINTER key1 [key2] 返回给定所有集合的交集
 func SInter[T any](ctx context.Context, keys ...string) (res []T, err error) {
-	cmd := client.SInter(ctx, keys...)
+	cmd := client.SInter(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
 		return nil, err
 	}
@@ -48,7 +48,7 @@ func SInter[T any](ctx context.Context, keys ...string) (res []T, err error) {
 
 // SInterStore 6	SINTERSTORE destination key1 [key2] 返回给定所有集合的交集并存储在 destination 中
 func SInterStore(ctx context.Context, destination string, keys ...string) (int64, error) {
-	cmd := client.SInterStore(ctx, associate(destination), keys...)
+	cmd := client.SInterStore(ctx, associate(destination), associateKeys(keys...)...)
 	return cmd.Val(), cmd.Err()
 }
 
@@ -120,7 +120,7 @@ func SRem(ctx context.Context, key string, members ...interface{}) (int64, error
 
 // SUnion 13	SUNION key1 [key2] 返回所有给定集合的并集
 func SUnion[T any](ctx context.Context, keys ...string) (res []T, err error) {
-	cmd := client.SUnion(ctx, keys...)
+	cmd := client.SUnion(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
 		return nil, err
 	}
@@ -129,6 +129,6 @@ func SUnion[T any](ctx context.Context, keys ...string) (res []T, err error) {
 
 // SUnionStore 14	SUNIONSTORE destination key1 [key2] 所有给定集合的并集存储在 destination 集合中
 func SUnionStore(ctx context.Context, destination string, keys ...string) (int64, error) {
-	cmd := client.SUnionStore(ctx, associate(destination), keys...)
+	cmd := client.SUnionStore(ctx, associate(destination), associateKeys(keys...)...)
 	return cmd.Val(), cmd.Err()
 }

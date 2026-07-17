@@ -68,11 +68,8 @@ func GetBit(ctx context.Context, key string, offset int64) (int64, error) {
 
 // MGet 6	MGET key1 [key2..] 获取所有(一个或多个)给定 key 的值。
 func MGet[T any](ctx context.Context, keys ...string) (res []T, err error) {
-	var args []string
-	for _, key := range keys {
-		args = append(args, associate(key))
-	}
-	cmd := client.MGet(ctx, args...)
+
+	cmd := client.MGet(ctx, associateKeys(keys...)...)
 
 	if cmd.Err() != nil {
 		err = cmd.Err()

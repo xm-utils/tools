@@ -26,7 +26,7 @@ func SCard(ctx context.Context, key string) int64 {
 func SDiff[T any](ctx context.Context, keys ...string) (res []T, err error) {
 	cmd := client.SDiff(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
-		return nil, err
+		return nil, cmd.Err()
 	}
 	return decodeArr[T](cmd.Val())
 }
@@ -41,7 +41,7 @@ func SDiffStore(ctx context.Context, destination string, keys ...string) (int64,
 func SInter[T any](ctx context.Context, keys ...string) (res []T, err error) {
 	cmd := client.SInter(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
-		return nil, err
+		return nil, cmd.Err()
 	}
 	return decodeArr[T](cmd.Val())
 }
@@ -66,7 +66,7 @@ func SIsMember(ctx context.Context, key string, member interface{}) (bool, error
 func SMembers[T any](ctx context.Context, key string) (res []T, err error) {
 	cmd := client.SMembers(ctx, associate(key))
 	if cmd.Err() != nil {
-		return nil, err
+		return nil, cmd.Err()
 	}
 	return decodeArr[T](cmd.Val())
 }
@@ -97,7 +97,7 @@ func SPop[T any](ctx context.Context, key string) (t T, err error) {
 func SRandMember[T any](ctx context.Context, key string, count int) (res []T, err error) {
 	cmd := client.SRandMemberN(ctx, associate(key), int64(count))
 	if cmd.Err() != nil {
-		return nil, err
+		return nil, cmd.Err()
 	}
 	return decodeArr[T](cmd.Val())
 
@@ -122,7 +122,7 @@ func SRem(ctx context.Context, key string, members ...interface{}) (int64, error
 func SUnion[T any](ctx context.Context, keys ...string) (res []T, err error) {
 	cmd := client.SUnion(ctx, associateKeys(keys...)...)
 	if cmd.Err() != nil {
-		return nil, err
+		return nil, cmd.Err()
 	}
 	return decodeArr[T](cmd.Val())
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/beego/beego/v2/client/orm"
+	"github.com/xm-utils/tools/common"
 )
 
 func ReadOne[T any](t T, cols ...string) *T {
@@ -81,7 +82,7 @@ func UpdateModel[T any](o orm.TxOrmer, old *T, form T) error {
 		return orm.ErrNoRows
 	}
 	var fields []string
-	old, fields = compareAndAssign(old, form)
+	old, fields = common.CompareAndAssign(old, form)
 	if len(fields) == 0 {
 		return nil
 	}

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/beego/beego/v2/client/orm"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/go-querystring/query"
 	"github.com/sirupsen/logrus"
 )

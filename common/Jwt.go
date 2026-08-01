@@ -1,15 +1,14 @@
 package common
 
 import (
-	"cashloan/internal/constant"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/XingMenTech/common/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
 )
 
 const (
@@ -41,7 +40,6 @@ var jwtSecret = []byte(TokenSecret)
 func GenerateAccessToken(uid int64, username string, userType int, deviceId string, clientIp string) (string, error) {
 	now := time.Now()
 	expireTime := now.Add(time.Duration(TokenInvalidTime) * time.Hour)
-	jti := utils.RandomString(32) // JWT ID，用于防止重放攻击
 
 	claims := Claims{
 		Uid:      uid,
@@ -55,7 +53,7 @@ func GenerateAccessToken(uid int64, username string, userType int, deviceId stri
 			NotBefore: now.Unix(),
 			Issuer:    "common-jwt-service",
 			Subject:   fmt.Sprintf("user_%d", uid),
-			Id:        jti,
+			Id:        uuid.NewString(),
 		},
 	}
 
@@ -237,7 +235,7 @@ func GetUsernameFromToken(token string) (string, error) {
 }
 
 func GetTokenFormGinContext(c *gin.Context) string {
-	authHeader := c.GetHeader(constant.GinHeaderTokenKey)
+	authHeader := c.GetHeader(GinHeaderTokenKey)
 	if authHeader == "" {
 		return ""
 	}

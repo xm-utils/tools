@@ -19,8 +19,8 @@ const (
 
 // PageParam 用于查询的类
 type PageParam struct {
-	Page     int
-	PageSize int
+	Page     int `json:"page" form:"page" binding:"required"`
+	PageSize int `json:"pageSize" form:"pageSize" binding:"required"`
 }
 
 func (bqp *PageParam) IsValid() bool {

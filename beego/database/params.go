@@ -141,13 +141,22 @@ func compareAndAssign[T any](target *T, src T) (*T, []string) {
 	// 存储有差异的字段名称
 	diffFields := make([]string, 0)
 
-	// 遍历结构体的所有字段
+	// 递归比较并赋值
+	compareAndAssignRecursive(aElem, bElem, &diffFields)
+
+	return target, diffFields
+}
+
+// compareAndAssignRecursive 递归比较两个结构体字段，将src中非空且不同的字段赋给target
+// prefix 用于拼接嵌套字段名（如 "Address.City"）
+func compareAndAssignRecursive(aElem, bElem reflect.Value, diffFields *[]string) {
 	for i := 0; i < bElem.NumField(); i++ {
 		bField := bElem.Field(i)
 		aField := aElem.Field(i)
 
 		// 获取字段名
 		fieldName := bElem.Type().Field(i).Name
+		fullFieldName := fieldName
 
 		// 检查b中的字段是否为空值
 		if isEmptyValue(bField) {
@@ -159,16 +168,38 @@ func compareAndAssign[T any](target *T, src T) (*T, []string) {
 			continue
 		}
 
+		// 如果字段是嵌套结构体（非 time.Time 等特殊类型），递归处理
+		if bField.Kind() == reflect.Struct && !isSpecialStruct(bField) {
+			compareAndAssignRecursive(aField, bField, diffFields)
+			continue
+		}
+
+		// 如果字段是指向结构体的指针（非 nil），解引用后递归处理
+		if bField.Kind() == reflect.Ptr && !bField.IsNil() && bField.Elem().Kind() == reflect.Struct && !isSpecialStruct(bField.Elem()) {
+			// 如果 target 侧为 nil，需要先分配
+			if aField.IsNil() {
+				aField.Set(reflect.New(bField.Type().Elem()))
+			}
+			compareAndAssignRecursive(aField.Elem(), bField.Elem(), diffFields)
+			continue
+		}
+
 		// 比较字段值是否不同
 		if !reflect.DeepEqual(aField.Interface(), bField.Interface()) {
 			// 将b中的值赋给a
 			aField.Set(bField)
 			// 添加到差异字段列表
-			diffFields = append(diffFields, fieldName)
+			*diffFields = append(*diffFields, fullFieldName)
 		}
 	}
+}
 
-	return target, diffFields
+// isSpecialStruct 判断结构体是否为特殊类型（如 time.Time），不应递归展开
+func isSpecialStruct(v reflect.Value) bool {
+	if _, ok := v.Interface().(time.Time); ok {
+		return true
+	}
+	return false
 }
 
 // isEmptyValue 检查值是否为空
@@ -190,7 +221,13 @@ func isEmptyValue(v reflect.Value) bool {
 		if t, ok := v.Interface().(time.Time); ok {
 			return t.IsZero()
 		}
-		// 注意：布尔值false不被认为是空值，因此不在此列
+		// 对于普通嵌套结构体，所有字段都为零值时视为空
+		for i := 0; i < v.NumField(); i++ {
+			if !isEmptyValue(v.Field(i)) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }

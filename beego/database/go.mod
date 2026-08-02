@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.2
 	github.com/google/go-querystring v1.2.0
 	github.com/sirupsen/logrus v1.9.4
-	github.com/xm-utils/tools/common v0.0.1
+	github.com/xm-utils/tools/common v0.0.3
 )
 
 require (

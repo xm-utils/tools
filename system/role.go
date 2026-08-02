@@ -52,7 +52,10 @@ type SysRoleController struct {
 func (ctrl *SysRoleController) PageList(c *gin.Context) {
 
 	var form validate.RoleListParam
-	_ = shouldBind(c, &form, map[string]string{})
+	if err := shouldBind(c, &form, common.PageParamError()); err != nil {
+		common.GinError(c, common.CommonParamError, err.Error())
+		return
+	}
 
 	cond := orm.NewCondition()
 
@@ -277,9 +280,7 @@ func (ctrl *SysRoleController) ChangeStatus(c *gin.Context) {
 func (ctrl *SysRoleController) AllocatedList(c *gin.Context) {
 
 	var form validate.RoleUserListParam
-	var formError = validate.RoleChangeStatusParamError()
-
-	if errData := shouldBind(c, &form, formError); errData != nil {
+	if errData := shouldBind(c, &form, common.PageParamError()); errData != nil {
 		common.GinError(c, common.CommonParamError, errData.Error())
 		return
 	}
@@ -308,9 +309,8 @@ func (ctrl *SysRoleController) AllocatedList(c *gin.Context) {
 
 func (ctrl *SysRoleController) UnAllocatedList(c *gin.Context) {
 	var form validate.RoleUserListParam
-	var formError = validate.RoleChangeStatusParamError()
 
-	if errData := shouldBind(c, &form, formError); errData != nil {
+	if errData := shouldBind(c, &form, common.PageParamError()); errData != nil {
 		common.GinError(c, common.CommonParamError, errData.Error())
 		return
 	}

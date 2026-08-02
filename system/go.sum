@@ -118,8 +118,14 @@ github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6Kllzaw
 github.com/valyala/bytebufferpool v1.0.0/go.mod h1:6bBcMArwyJ5K/AmCkWv1jt77kVWyCJ6HpOuEn7z0Csc=
 github.com/xm-utils/tools/beego/database v0.0.8 h1:gu9jX1Awft3D7Live31nbTapaEJzklwOULL4i5+duxc=
 github.com/xm-utils/tools/beego/database v0.0.8/go.mod h1:c7yoUSbcuhNwJ5t5Cn+y3CTmkrIKQbkrxHiK7tReMOw=
+github.com/xm-utils/tools/beego/database v0.0.10 h1:geK3ccYDJ99h2lVnFmrR6STI7uka8ecoiECNa0s4Tfg=
+github.com/xm-utils/tools/beego/database v0.0.10/go.mod h1:c7yoUSbcuhNwJ5t5Cn+y3CTmkrIKQbkrxHiK7tReMOw=
+github.com/xm-utils/tools/beego/database v0.0.11 h1:W4ScISm2gqrFagq5BlNsmpUJOMJWFRYv3ijs8PGIoak=
+github.com/xm-utils/tools/beego/database v0.0.11/go.mod h1:E90jhaRuaB6HseLzOZ7tElZb5Cnx2R5xBKseb2GAtpQ=
 github.com/xm-utils/tools/common v0.0.1 h1:wGoMU6N5+gru7lpwx5c0NovfjVsdw9/cBmpoFPpdWIU=
 github.com/xm-utils/tools/common v0.0.1/go.mod h1:ckLR4DoZR1KEErzKVWLnYG3gPD/w2H0rtC2ARqHDd3M=
+github.com/xm-utils/tools/common v0.0.3 h1:SGRnUY5f7/oUI7un9BjpflVDj2K/saVGhATuGuolTlg=
+github.com/xm-utils/tools/common v0.0.3/go.mod h1:ckLR4DoZR1KEErzKVWLnYG3gPD/w2H0rtC2ARqHDd3M=
 github.com/xm-utils/tools/grpcx v1.0.1 h1:4rShizEHJRt110HFmgF9BcXTIXpg3gwER37VFFLHxr8=
 github.com/xm-utils/tools/grpcx v1.0.1/go.mod h1:Xm+swYwTqnrLXOHv/6lMHVSeUtHpEPcA4VS4ZUVWZa0=
 github.com/xm-utils/tools/redis v1.0.2 h1:n3//+MSO8D8JD6Z9CcUFbIKnVPxAcew7qZ8N5DFpkWs=

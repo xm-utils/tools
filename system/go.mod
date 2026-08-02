@@ -8,8 +8,8 @@ require (
 	github.com/go-playground/validator/v10 v10.30.1
 	github.com/pkg/errors v0.9.1
 	github.com/sirupsen/logrus v1.9.4
-	github.com/xm-utils/tools/beego/database v0.0.8
-	github.com/xm-utils/tools/common v0.0.1
+	github.com/xm-utils/tools/beego/database v0.0.11
+	github.com/xm-utils/tools/common v0.0.3
 	github.com/xm-utils/tools/grpcx v1.0.1
 	github.com/xm-utils/tools/redis v1.0.2
 )

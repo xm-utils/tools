@@ -61,9 +61,6 @@ func UserPageList(param *UserListParam) ([]*SysUser, int64, error) {
 	if param.Status > 0 {
 		cond = cond.And("status", param.Status)
 	}
-	if param.TimeParam != nil && param.TimeParam.IsValid() {
-		param.TimeParam.Column = "create_time"
-	}
 
 	if param.RoleId > 0 {
 		roleUsers, _ := database.FindList[SysUserRole](orm.NewCondition().And("role_id", param.RoleId))
@@ -79,10 +76,11 @@ func UserPageList(param *UserListParam) ([]*SysUser, int64, error) {
 	}
 
 	return database.FindAll[SysUser](database.ListParam{
-		Param: cond,
-		Page:  param.PageParam,
-		Time:  param.TimeParam,
-		Order: order_clause.ParseOrder("-id"),
+		Param:      cond,
+		Page:       param.PageParam,
+		Time:       param.TimeParam,
+		TimeColumn: "create_time",
+		Order:      order_clause.ParseOrder("-id"),
 	})
 }
 
@@ -117,8 +115,7 @@ func (ctrl *User) UserInfo(c *gin.Context) {
 
 func (ctrl *User) List(c *gin.Context) {
 	var form UserListParam
-	//_ = shouldBind(c, &form, map[string]string{})
-	if errData := shouldBind(c, &form, validate.ListAdminGroupFormError()); errData != nil {
+	if errData := shouldBind(c, &form, common.PageParamError()); errData != nil {
 		common.GinError(c, common.CommonParamError, errData.Error())
 		return
 	}

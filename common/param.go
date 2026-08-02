@@ -77,8 +77,8 @@ func parseLocalTime(value string) (time.Time, error) {
 
 // PageParam 用于查询的类
 type PageParam struct {
-	Page     int `json:"page" form:"page" binding:"required"`
-	PageSize int `json:"pageSize" form:"pageSize" binding:"required"`
+	Page     int `json:"page" form:"page" binding:"required,min=1"`
+	PageSize int `json:"pageSize" form:"pageSize" binding:"required,min=1"`
 }
 
 func (bqp *PageParam) IsValid() bool {
@@ -107,4 +107,12 @@ func (bqp *PageParam) GetLimit() (limit, offset int) {
 	limit = bqp.PageSize
 	offset = (bqp.Page - 1) * bqp.PageSize
 	return
+}
+func PageParamError() map[string]string {
+	return map[string]string{
+		"Page.required":     "页数参数缺失",
+		"Page.min":          "页数参数缺失",
+		"PageSize.required": "每页条数参数缺失",
+		"PageSize.min":      "每页条数参数缺失",
+	}
 }

@@ -4,8 +4,17 @@ import (
 	"fmt"
 
 	"github.com/beego/beego/v2/client/orm"
+	"github.com/beego/beego/v2/client/orm/clauses/order_clause"
 	"github.com/xm-utils/tools/common"
 )
+
+type ListParam struct {
+	Param      *orm.Condition
+	Page       *common.PageParam
+	Time       *common.TimeParam
+	TimeColumn string
+	Order      []*order_clause.Order
+}
 
 func ReadOne[T any](t T, cols ...string) *T {
 	if err := orm.NewOrm().Read(&t, cols...); err != nil {

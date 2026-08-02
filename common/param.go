@@ -26,7 +26,6 @@ type IdArrParam struct {
 
 // TimeParam 时间区间参数
 type TimeParam struct {
-	Column    string `json:"column" form:"column"`
 	StartTime string `json:"startTime" form:"startTime" binding:"required"` //开始时间
 	EndTime   string `json:"endTime" form:"endTime" binding:"required"`     //结束时间
 	st        time.Time

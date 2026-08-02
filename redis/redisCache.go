@@ -214,7 +214,6 @@ func decodeVal[T any](data string) (T, error) {
 		}
 		return any(intVal).(T), nil
 	case reflect.Int64:
-		//int64Val := utils.StringToInt64(data)
 		int64Val, err := strconv.ParseInt(data, 10, 64)
 		if err != nil {
 			var zero T
@@ -222,7 +221,6 @@ func decodeVal[T any](data string) (T, error) {
 		}
 		return any(int64Val).(T), nil
 	case reflect.Float64:
-		//floatVal := utils.StringToFloat64(data)
 		floatVal, err := strconv.ParseFloat(data, 64)
 		if err != nil {
 			var zero T

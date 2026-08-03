@@ -22,7 +22,9 @@ type MenuListForm struct {
 }
 
 type MenuTreeModel struct {
+	Id         int64            `json:"id"`
 	Name       string           `json:"name,omitempty"`
+	NameEn     string           `json:"name_en,omitempty"`
 	Path       string           `json:"path,omitempty"`
 	Hidden     bool             `json:"hidden,omitempty"`
 	Redirect   string           `json:"redirect,omitempty"`
@@ -131,7 +133,9 @@ func formatMenu(menu *SysMenu) *MenuTreeModel {
 	}
 
 	return &MenuTreeModel{
-		Name:       menu.GetRouteName(),
+		Id:         menu.Id,
+		Name:       menu.MenuName,
+		NameEn:     menu.MenuNameEn,
 		Path:       menu.GetRouterPath(),
 		Hidden:     menu.Visible == common.StatusDisable,
 		Redirect:   "",

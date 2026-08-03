@@ -401,8 +401,8 @@ func (ctrl *DictDetail) FindByType(c *gin.Context) {
 		},
 		func(detail *DictData) common.SelectOption[string] {
 			return common.SelectOption[string]{
-				Type:     detail.DictLabel,
-				TypeName: detail.DictValue,
+				Type:     detail.DictValue,
+				TypeName: detail.DictLabel,
 			}
 		})
 

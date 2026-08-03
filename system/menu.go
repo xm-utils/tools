@@ -282,6 +282,7 @@ func (ctrl *Menu) Del(c *gin.Context) {
 	roleMenus, _ := database.Count[SysRoleMenu](orm.NewCondition().And("menu_id", param.Id))
 	if roleMenus > 0 {
 		common.GinError(c, AdminMenuDeleteFailure, "菜单已分配,不允许删除")
+		return
 	}
 
 	if err := database.Delete(nil, one); err != nil {

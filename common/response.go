@@ -1,9 +1,12 @@
 package common
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
+	"github.com/sirupsen/logrus"
 )
 
 type Select[T comparable] []SelectOption[T]
@@ -66,4 +69,29 @@ func GinError(c *gin.Context, code int, message ...string) {
 		Code:    int32(code),
 		Message: msg,
 	})
+}
+
+func GinShouldBind(ctx *gin.Context, form interface{}, formError map[string]string) CustomError {
+	if err := ctx.ShouldBind(form); err != nil {
+		return bindError(err, formError)
+	}
+	return nil
+}
+func GinShouldBindUri(ctx *gin.Context, form interface{}, formError map[string]string) CustomError {
+	if err := ctx.ShouldBindUri(form); err != nil {
+		return bindError(err, formError)
+	}
+	return nil
+}
+func bindError(err error, formError map[string]string) CustomError {
+	var errInfo validator.ValidationErrors
+	var errMessage CustomError
+	errors.As(err, &errInfo)
+	for _, info := range errInfo {
+		errTag := info.Field() + "." + info.Tag()
+		logrus.Error(formError[errTag])
+		errMessage = NewError(CommonParamError, formError[errTag])
+		break
+	}
+	return errMessage
 }

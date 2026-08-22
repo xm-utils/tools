@@ -84,14 +84,15 @@ func GinShouldBindUri(ctx *gin.Context, form interface{}, formError map[string]s
 	return nil
 }
 func bindError(err error, formError map[string]string) CustomError {
+
 	var errInfo validator.ValidationErrors
-	var errMessage CustomError
 	errors.As(err, &errInfo)
+	errMsg := err.Error()
 	for _, info := range errInfo {
 		errTag := info.Field() + "." + info.Tag()
 		logrus.Error(formError[errTag])
-		errMessage = NewError(CommonParamError, formError[errTag])
+		errMsg = formError[errTag]
 		break
 	}
-	return errMessage
+	return NewError(CommonParamError, errMsg)
 }

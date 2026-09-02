@@ -17,6 +17,14 @@ const (
 	RefreshTokenTime = 7 * 24 //小时 - 刷新令牌有效期
 )
 
+type CustomClaims interface {
+	jwt.Claims
+	GetId() string
+	GetUserId() int64
+	GetUsername() string
+	GetDeviceId() string
+}
+
 type Claims struct {
 	Uid      int64  `json:"uid"`
 	Username string `json:"username"`
@@ -25,6 +33,11 @@ type Claims struct {
 	ClientIp string `json:"client_ip"` // 客户端IP
 	jwt.StandardClaims
 }
+
+func (c *Claims) GetId() string       { return c.Id }
+func (c *Claims) GetUserId() int64    { return c.Uid }
+func (c *Claims) GetUsername() string { return c.Username }
+func (c *Claims) GetDeviceId() string { return c.DeviceId }
 
 // RefreshClaims 刷新令牌的声明
 type RefreshClaims struct {
@@ -35,6 +48,16 @@ type RefreshClaims struct {
 }
 
 var jwtSecret = []byte(TokenSecret)
+
+func GenerateClaimsToken(claims jwt.Claims) (string, error) {
+	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	token, err := tokenClaims.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	return token, nil
+}
 
 // GenerateAccessToken 生成访问令牌
 func GenerateAccessToken(uid int64, username string, userType int, deviceId string, clientIp string) (string, error) {
@@ -93,30 +116,56 @@ func GenerateRefreshToken(uid int64, originalJti string, deviceId string) (strin
 	return token, nil
 }
 
+func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refreshToken string, err error) {
+	accessToken, err = GenerateClaimsToken(claims)
+	if err != nil {
+		return
+	}
+
+	// 解析访问令牌获取JTI
+	claim, err := ParseAccessTokenWithClaims(accessToken, claims)
+	if err != nil {
+		return
+	}
+
+	refreshToken, err = GenerateRefreshToken(claims.GetUserId(), claim.GetId(), claims.GetDeviceId())
+	if err != nil {
+		return
+	}
+
+	return
+}
+
 // GenerateTokenPair 生成访问令牌和刷新令牌对
 func GenerateTokenPair(uid int64, username string, userType int, deviceId string, clientIp string) (accessToken string, refreshToken string, err error) {
 	accessToken, err = GenerateAccessToken(uid, username, userType, deviceId, clientIp)
 	if err != nil {
-		return "", "", err
+		return
 	}
 
 	// 解析访问令牌获取JTI
-	claims, err := ParseAccessToken(accessToken)
+	claims, err := ParseAccessTokenWithClaims(accessToken, &Claims{})
 	if err != nil {
-		return "", "", err
+		return
 	}
 
 	refreshToken, err = GenerateRefreshToken(uid, claims.Id, deviceId)
 	if err != nil {
-		return "", "", err
+		return
 	}
 
 	return accessToken, refreshToken, nil
 }
 
-// ParseAccessToken 解析访问令牌
+// ParseAccessToken 解析访问令牌（使用默认Claims类型）
 func ParseAccessToken(token string) (*Claims, error) {
-	tokenClaims, err := jwt.ParseWithClaims(token, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+	return ParseAccessTokenWithClaims(token, &Claims{})
+}
+
+// ParseAccessTokenWithClaims 解析访问令牌，支持自定义Claims实体
+// claims参数需要传入一个实现了CustomClaims接口的空实例，解析结果将写入该实例
+func ParseAccessTokenWithClaims[T CustomClaims](token string, claims T) (T, error) {
+	tokenClaims, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		// 验证签名方法
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
@@ -125,15 +174,17 @@ func ParseAccessToken(token string) (*Claims, error) {
 	})
 
 	if err != nil {
-		return nil, err
+		var zero T
+		return zero, err
 	}
 
-	claims, ok := tokenClaims.Claims.(*Claims)
+	c, ok := tokenClaims.Claims.(T)
 	if !ok || !tokenClaims.Valid {
-		return nil, errors.New("invalid token")
+		var zero T
+		return zero, errors.New("invalid token")
 	}
 
-	return claims, nil
+	return c, nil
 }
 
 // ParseRefreshToken 解析刷新令牌
@@ -158,19 +209,20 @@ func ParseRefreshToken(token string) (*RefreshClaims, error) {
 	return claims, nil
 }
 
-// ValidateAccessToken 验证访问令牌是否有效
+// ValidateAccessToken 验证访问令牌是否有效（使用默认Claims类型）
 func ValidateAccessToken(token string) (*Claims, error) {
-	claims, err := ParseAccessToken(token)
+	return ValidateAccessTokenWithClaims(token, &Claims{})
+}
+
+// ValidateAccessTokenWithClaims 验证访问令牌是否有效，支持自定义Claims实体
+func ValidateAccessTokenWithClaims[T CustomClaims](token string, claims T) (T, error) {
+	parsed, err := ParseAccessTokenWithClaims(token, claims)
 	if err != nil {
-		return nil, err
+		var zero T
+		return zero, err
 	}
 
-	// 检查是否过期
-	if claims.ExpiresAt < time.Now().Unix() {
-		return nil, errors.New("token has expired")
-	}
-
-	return claims, nil
+	return parsed, nil
 }
 
 // ValidateRefreshToken 验证刷新令牌是否有效

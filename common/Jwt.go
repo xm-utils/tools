@@ -23,20 +23,28 @@ type CustomClaims interface {
 	GetUserId() int64
 	GetUsername() string
 	GetDeviceId() string
+	SetJwtClaims(claims jwt.Claims)
+}
+type CustomClaimsImpl struct {
+	UserId   int64  `json:"userId"`
+	UserName string `json:"userName"`
+	ClientIp string `json:"client_ip"` // 客户端IP
+	jwt.RegisteredClaims
+}
+
+func (c *CustomClaimsImpl) GetId() string       { return c.ID }
+func (c *CustomClaimsImpl) GetUserId() int64    { return c.UserId }
+func (c *CustomClaimsImpl) GetUsername() string { return c.UserName }
+func (c *CustomClaimsImpl) SetJwtClaims(claims jwt.Claims) {
+	c.RegisteredClaims = claims.(jwt.RegisteredClaims)
 }
 
 type Claims struct {
-	Uid      int64  `json:"uid"`
-	Username string `json:"username"`
-	UserType int    `json:"user_type"` // 用户类型
+	CustomClaimsImpl
+	UserType int    `json:"user_type"`
 	DeviceId string `json:"device_id"` // 设备ID
-	ClientIp string `json:"client_ip"` // 客户端IP
-	jwt.StandardClaims
 }
 
-func (c *Claims) GetId() string       { return c.Id }
-func (c *Claims) GetUserId() int64    { return c.Uid }
-func (c *Claims) GetUsername() string { return c.Username }
 func (c *Claims) GetDeviceId() string { return c.DeviceId }
 
 // RefreshClaims 刷新令牌的声明
@@ -65,20 +73,22 @@ func GenerateAccessToken(uid int64, username string, userType int, deviceId stri
 	expireTime := now.Add(time.Duration(TokenInvalidTime) * time.Hour)
 
 	claims := Claims{
-		Uid:      uid,
-		Username: username,
+		CustomClaimsImpl: CustomClaimsImpl{
+			UserId:   uid,
+			UserName: username,
+			ClientIp: clientIp,
+		},
 		UserType: userType,
 		DeviceId: deviceId,
-		ClientIp: clientIp,
-		StandardClaims: jwt.StandardClaims{
-			ExpiresAt: expireTime.Unix(),
-			IssuedAt:  now.Unix(),
-			NotBefore: now.Unix(),
-			Issuer:    "common-jwt-service",
-			Subject:   fmt.Sprintf("user_%d", uid),
-			Id:        uuid.NewString(),
-		},
 	}
+	claims.SetJwtClaims(jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(expireTime),
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+		Issuer:    "common-jwt-service",
+		Subject:   fmt.Sprintf("user_%d", uid),
+		ID:        uuid.NewString(),
+	})
 
 	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	token, err := tokenClaims.SignedString(jwtSecret)
@@ -117,6 +127,18 @@ func GenerateRefreshToken(uid int64, originalJti string, deviceId string) (strin
 }
 
 func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refreshToken string, err error) {
+	now := time.Now()
+	expireTime := now.Add(time.Duration(TokenInvalidTime) * time.Hour)
+
+	claims.SetJwtClaims(jwt.StandardClaims{
+		ExpiresAt: expireTime.Unix(),
+		IssuedAt:  now.Unix(),
+		NotBefore: now.Unix(),
+		Issuer:    "common-jwt-service",
+		Subject:   fmt.Sprintf("user_%d", claims.GetUserId()),
+		Id:        uuid.NewString(),
+	})
+
 	accessToken, err = GenerateClaimsToken(claims)
 	if err != nil {
 		return
@@ -149,7 +171,7 @@ func GenerateTokenPair(uid int64, username string, userType int, deviceId string
 		return
 	}
 
-	refreshToken, err = GenerateRefreshToken(uid, claims.Id, deviceId)
+	refreshToken, err = GenerateRefreshToken(uid, claims.ID, deviceId)
 	if err != nil {
 		return
 	}
@@ -274,7 +296,7 @@ func GetUidFromToken(token string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return claims.Uid, nil
+	return claims.UserId, nil
 }
 
 // GetUsernameFromToken 从令牌中提取用户名
@@ -283,7 +305,7 @@ func GetUsernameFromToken(token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return claims.Username, nil
+	return claims.UserName, nil
 }
 
 func GetTokenFormGinContext(c *gin.Context) string {

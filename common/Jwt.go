@@ -23,7 +23,7 @@ type CustomClaims interface {
 	GetUserId() int64
 	GetUsername() string
 	GetDeviceId() string
-	SetJwtClaims(claims jwt.Claims)
+	SetJwtClaims(claims jwt.RegisteredClaims)
 }
 type CustomClaimsImpl struct {
 	UserId   int64  `json:"userId"`
@@ -35,8 +35,8 @@ type CustomClaimsImpl struct {
 func (c *CustomClaimsImpl) GetId() string       { return c.ID }
 func (c *CustomClaimsImpl) GetUserId() int64    { return c.UserId }
 func (c *CustomClaimsImpl) GetUsername() string { return c.UserName }
-func (c *CustomClaimsImpl) SetJwtClaims(claims jwt.Claims) {
-	c.RegisteredClaims = claims.(jwt.RegisteredClaims)
+func (c *CustomClaimsImpl) SetJwtClaims(claims jwt.RegisteredClaims) {
+	c.RegisteredClaims = claims
 }
 
 type Claims struct {
@@ -130,13 +130,13 @@ func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refre
 	now := time.Now()
 	expireTime := now.Add(time.Duration(TokenInvalidTime) * time.Hour)
 
-	claims.SetJwtClaims(jwt.StandardClaims{
-		ExpiresAt: expireTime.Unix(),
-		IssuedAt:  now.Unix(),
-		NotBefore: now.Unix(),
+	claims.SetJwtClaims(jwt.RegisteredClaims{
+		ExpiresAt: jwt.NewNumericDate(expireTime),
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
 		Issuer:    "common-jwt-service",
 		Subject:   fmt.Sprintf("user_%d", claims.GetUserId()),
-		Id:        uuid.NewString(),
+		ID:        uuid.NewString(),
 	})
 
 	accessToken, err = GenerateClaimsToken(claims)

@@ -68,7 +68,7 @@ func GenerateClaimsToken(claims jwt.Claims) (string, error) {
 }
 
 // GenerateAccessToken 生成访问令牌
-func GenerateAccessToken(uid int64, username string, userType int, deviceId string, clientIp string) (string, error) {
+func GenerateAccessToken(uid int64, username string, userType int, deviceId string, clientIp string) (string, string, error) {
 	now := time.Now()
 	expireTime := now.Add(time.Duration(TokenInvalidTime) * time.Hour)
 
@@ -90,13 +90,15 @@ func GenerateAccessToken(uid int64, username string, userType int, deviceId stri
 		ID:        uuid.NewString(),
 	})
 
-	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token, err := tokenClaims.SignedString(jwtSecret)
-	if err != nil {
-		return "", err
-	}
+	//tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	//token, err := tokenClaims.SignedString(jwtSecret)
+	//if err != nil {
+	//	return "", err
+	//}
 
-	return token, nil
+	token, err := GenerateClaimsToken(claims)
+
+	return token, claims.GetId(), err
 }
 
 // GenerateRefreshToken 生成刷新令牌
@@ -117,13 +119,13 @@ func GenerateRefreshToken(uid int64, originalJti string, deviceId string) (strin
 		},
 	}
 
-	tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	token, err := tokenClaims.SignedString(jwtSecret)
-	if err != nil {
-		return "", err
-	}
+	//tokenClaims := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	//token, err := tokenClaims.SignedString(jwtSecret)
+	//if err != nil {
+	//	return "", err
+	//}
 
-	return token, nil
+	return GenerateClaimsToken(claims)
 }
 
 func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refreshToken string, err error) {
@@ -144,13 +146,7 @@ func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refre
 		return
 	}
 
-	// 解析访问令牌获取JTI
-	claim, err := ParseAccessTokenWithClaims(accessToken, claims)
-	if err != nil {
-		return
-	}
-
-	refreshToken, err = GenerateRefreshToken(claims.GetUserId(), claim.GetId(), claims.GetDeviceId())
+	refreshToken, err = GenerateRefreshToken(claims.GetUserId(), claims.GetId(), claims.GetDeviceId())
 	if err != nil {
 		return
 	}
@@ -160,18 +156,13 @@ func GenerateTokenPairWithClaims(claims CustomClaims) (accessToken string, refre
 
 // GenerateTokenPair 生成访问令牌和刷新令牌对
 func GenerateTokenPair(uid int64, username string, userType int, deviceId string, clientIp string) (accessToken string, refreshToken string, err error) {
-	accessToken, err = GenerateAccessToken(uid, username, userType, deviceId, clientIp)
+	var claimsID = ""
+	accessToken, claimsID, err = GenerateAccessToken(uid, username, userType, deviceId, clientIp)
 	if err != nil {
 		return
 	}
 
-	// 解析访问令牌获取JTI
-	claims, err := ParseAccessTokenWithClaims(accessToken, &Claims{})
-	if err != nil {
-		return
-	}
-
-	refreshToken, err = GenerateRefreshToken(uid, claims.ID, deviceId)
+	refreshToken, err = GenerateRefreshToken(uid, claimsID, deviceId)
 	if err != nil {
 		return
 	}
@@ -263,31 +254,23 @@ func ValidateRefreshToken(token string) (*RefreshClaims, error) {
 }
 
 // RefreshAccessToken 使用刷新令牌获取新的访问令牌
-func RefreshAccessToken(refreshTokenStr string) (newAccessToken string, newRefreshToken string, err error) {
+func RefreshAccessToken(refreshTokenStr string, claimsFunc func(*RefreshClaims) CustomClaims) (newAccessToken string, newRefreshToken string, err error) {
 	// 验证刷新令牌
 	refreshClaims, err := ValidateRefreshToken(refreshTokenStr)
 	if err != nil {
-		return "", "", err
+		return
 	}
-
 	// 这里应该从存储中验证original_jti是否仍然有效（未被撤销）
 	// 为了简化，我们假设刷新令牌本身的有效性就足够了
 
 	// 生成新的访问令牌和刷新令牌
-	// 注意：在实际应用中，您可能需要从数据库或其他存储中获取用户的最新信息
-	newAccessToken, newRefreshToken, err = GenerateTokenPair(
-		refreshClaims.Uid,
-		"", // 用户名可能需要从数据库中重新获取
-		0,  // 用户类型可能需要从数据库中重新获取
-		"", // 设备ID可能需要从原始请求中获取
-		"", // 客户端IP可能需要从原始请求中获取
-	)
-
+	claims := claimsFunc(refreshClaims)
+	newAccessToken, newRefreshToken, err = GenerateTokenPairWithClaims(claims)
 	if err != nil {
-		return "", "", err
+		return
 	}
 
-	return newAccessToken, newRefreshToken, nil
+	return
 }
 
 // GetUidFromToken 从令牌中提取用户ID

@@ -39,21 +39,14 @@ func (req *TimeParam) IsValid() bool {
 	if req.StartTime == "" || req.EndTime == "" {
 		return false
 	}
-
-	st, err := parseLocalTime(req.StartTime)
-	if err != nil {
-		return false
-	}
-	req.st = st
-	et, err := parseLocalTime(req.EndTime)
-	if err != nil {
-		return false
-	}
-	req.et = et
-
+	req.st = ParseLocalTime(req.StartTime)
+	req.et = ParseLocalTime(req.EndTime)
 	return true
 }
 
+func (req *TimeParam) GetTimeStr() (start, end string) {
+	return req.StartTime, req.EndTime
+}
 func (req *TimeParam) GetTime() (start, end time.Time) {
 	if !req.IsValid() {
 		return

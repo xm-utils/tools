@@ -585,17 +585,25 @@ func FormatDate(t time.Time) string {
 	return formatTime(t, t.Location(), DateFormat)
 }
 
-func ParseLocalDate(value string) time.Time {
-	t, _ := time.ParseInLocation(DateFormat, value, TimeLocation)
+func parseTime(value, layout string, loc *time.Location) time.Time {
+	t, _ := time.ParseInLocation(layout, value, loc)
 	return t
 }
+
 func ParseLocalTime(value string) time.Time {
 	layout := DateFormat
 	if len(value) > 10 {
 		layout = TimeFormat
 	}
-	t, _ := time.ParseInLocation(layout, value, TimeLocation)
-	return t
+	return parseTime(value, layout, TimeLocation)
+}
+
+func ParseTime(value string, loc *time.Location) time.Time {
+	layout := DateFormat
+	if len(value) > 10 {
+		layout = TimeFormat
+	}
+	return parseTime(value, layout, loc)
 }
 
 func ParseUtcTime(value string) time.Time {

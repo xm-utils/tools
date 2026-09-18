@@ -78,6 +78,12 @@ func InitMysql(config *MysqlConfig) error {
 	//如果是开发模式，则显示命令信息
 	if config.Debug == "true" {
 		orm.Debug = true
+		// 4. 将 ORM 日志输出重定向到 Logrus
+		// 创建一个写入器，指定日志级别为 Debug
+		logrusWriter := NewLogrusWriter(logrus.StandardLogger(), logrus.DebugLevel)
+
+		// 关键步骤：替换 ORM 的默认日志输出
+		orm.DebugLog = orm.NewLog(logrusWriter)
 	}
 	prefix = config.TablePrefix
 	return nil

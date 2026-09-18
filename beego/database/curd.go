@@ -42,7 +42,7 @@ func FindAll[T any](form ListParam) (list []*T, total int64, err error) {
 	if timeParam != nil && timeParam.IsValid() {
 		column := form.TimeColumn
 		start, end := timeParam.GetTime()
-		query = query.Filter(fmt.Sprintf("%s__gte", column), start).Filter(fmt.Sprintf("%s__lt", column), end)
+		query = query.Filter(fmt.Sprintf("%s__gte", column), start).Filter(fmt.Sprintf("%s__lte", column), end)
 	}
 
 	total, err = query.Count()

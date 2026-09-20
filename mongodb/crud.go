@@ -11,8 +11,12 @@ import (
 )
 
 // InsertOne 插入单个文档
-func (c *Client) InsertOne(ctx context.Context, collectionName string, document interface{}, dbName ...string) (*mongo.InsertOneResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) InsertOne(ctx context.Context, collectionName string, document interface{}, dbName ...string) (result *mongo.InsertOneResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -20,8 +24,12 @@ func (c *Client) InsertOne(ctx context.Context, collectionName string, document 
 }
 
 // InsertMany 批量插入文档
-func (c *Client) InsertMany(ctx context.Context, collectionName string, documents []interface{}, dbName ...string) (*mongo.InsertManyResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) InsertMany(ctx context.Context, collectionName string, documents []interface{}, dbName ...string) (result *mongo.InsertManyResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -34,14 +42,17 @@ func (c *Client) InsertMany(ctx context.Context, collectionName string, document
 }
 
 // FindOne 查询单个文档
-func (c *Client) FindOne(ctx context.Context, collectionName string, filter interface{}, result interface{}, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) FindOne(ctx context.Context, collectionName string, filter interface{}, result interface{}, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	err := coll.FindOne(ctx, filter).Decode(result)
-	if err != nil {
+	if err = coll.FindOne(ctx, filter).Decode(result); err != nil {
 		if err == mongo.ErrNoDocuments {
 			return errors.New("document not found")
 		}
@@ -52,8 +63,12 @@ func (c *Client) FindOne(ctx context.Context, collectionName string, filter inte
 }
 
 // FindOneWithOptions 使用选项查询单个文档
-func (c *Client) FindOneWithOptions(ctx context.Context, collectionName string, filter interface{}, result interface{}, opts *options.FindOneOptions, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) FindOneWithOptions(ctx context.Context, collectionName string, filter interface{}, result interface{}, opts *options.FindOneOptions, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -84,8 +99,12 @@ func (c *Client) FindOneWithOptions(ctx context.Context, collectionName string, 
 }
 
 // Find 查询多个文档
-func (c *Client) Find(ctx context.Context, collectionName string, filter interface{}, dbName ...string) ([]map[string]interface{}, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) Find(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (results []map[string]interface{}, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -96,7 +115,6 @@ func (c *Client) Find(ctx context.Context, collectionName string, filter interfa
 	}
 	defer cursor.Close(ctx)
 
-	var results []map[string]interface{}
 	if err = cursor.All(ctx, &results); err != nil {
 		return nil, err
 	}
@@ -105,8 +123,12 @@ func (c *Client) Find(ctx context.Context, collectionName string, filter interfa
 }
 
 // FindWithDecode 查询多个文档并解码到指定类型
-func (c *Client) FindWithDecode(ctx context.Context, collectionName string, filter interface{}, result interface{}, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) FindWithDecode(ctx context.Context, collectionName string, filter interface{}, result interface{}, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -125,8 +147,12 @@ func (c *Client) FindWithDecode(ctx context.Context, collectionName string, filt
 }
 
 // FindWithOptions 使用选项查询多个文档
-func (c *Client) FindWithOptions(ctx context.Context, collectionName string, filter interface{}, opts *options.FindOptionsBuilder, dbName ...string) ([]map[string]interface{}, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) FindWithOptions(ctx context.Context, collectionName string, filter interface{}, opts *options.FindOptionsBuilder, dbName ...string) (results []map[string]interface{}, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -137,7 +163,6 @@ func (c *Client) FindWithOptions(ctx context.Context, collectionName string, fil
 	}
 	defer cursor.Close(ctx)
 
-	var results []map[string]interface{}
 	if err = cursor.All(ctx, &results); err != nil {
 		return nil, err
 	}
@@ -146,8 +171,12 @@ func (c *Client) FindWithOptions(ctx context.Context, collectionName string, fil
 }
 
 // UpdateOne 更新单个文档
-func (c *Client) UpdateOne(ctx context.Context, collectionName string, filter interface{}, update interface{}, dbName ...string) (*mongo.UpdateResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) UpdateOne(ctx context.Context, collectionName string, filter interface{}, update interface{}, dbName ...string) (result *mongo.UpdateResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -156,8 +185,12 @@ func (c *Client) UpdateOne(ctx context.Context, collectionName string, filter in
 }
 
 // UpdateOneWithOptions 使用选项更新单个文档
-func (c *Client) UpdateOneWithOptions(ctx context.Context, collectionName string, filter interface{}, update interface{}, opts *options.UpdateOneOptionsBuilder, dbName ...string) (*mongo.UpdateResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) UpdateOneWithOptions(ctx context.Context, collectionName string, filter interface{}, update interface{}, opts *options.UpdateOneOptionsBuilder, dbName ...string) (result *mongo.UpdateResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -166,8 +199,12 @@ func (c *Client) UpdateOneWithOptions(ctx context.Context, collectionName string
 }
 
 // UpdateMany 更新多个文档
-func (c *Client) UpdateMany(ctx context.Context, collectionName string, filter interface{}, update interface{}, dbName ...string) (*mongo.UpdateResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) UpdateMany(ctx context.Context, collectionName string, filter interface{}, update interface{}, dbName ...string) (result *mongo.UpdateResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -176,8 +213,12 @@ func (c *Client) UpdateMany(ctx context.Context, collectionName string, filter i
 }
 
 // ReplaceOne 替换单个文档
-func (c *Client) ReplaceOne(ctx context.Context, collectionName string, filter interface{}, replacement interface{}, dbName ...string) (*mongo.UpdateResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) ReplaceOne(ctx context.Context, collectionName string, filter interface{}, replacement interface{}, dbName ...string) (result *mongo.UpdateResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -186,8 +227,12 @@ func (c *Client) ReplaceOne(ctx context.Context, collectionName string, filter i
 }
 
 // DeleteOne 删除单个文档
-func (c *Client) DeleteOne(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (*mongo.DeleteResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) DeleteOne(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (result *mongo.DeleteResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -196,8 +241,12 @@ func (c *Client) DeleteOne(ctx context.Context, collectionName string, filter in
 }
 
 // DeleteMany 删除多个文档
-func (c *Client) DeleteMany(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (*mongo.DeleteResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) DeleteMany(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (result *mongo.DeleteResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -206,8 +255,12 @@ func (c *Client) DeleteMany(ctx context.Context, collectionName string, filter i
 }
 
 // CountDocuments 统计文档数量
-func (c *Client) CountDocuments(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (int64, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) CountDocuments(ctx context.Context, collectionName string, filter interface{}, dbName ...string) (count int64, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return 0, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -216,8 +269,12 @@ func (c *Client) CountDocuments(ctx context.Context, collectionName string, filt
 }
 
 // EstimatedDocumentCount 获取估算的文档数量
-func (c *Client) EstimatedDocumentCount(ctx context.Context, collectionName string, dbName ...string) (int64, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) EstimatedDocumentCount(ctx context.Context, collectionName string, dbName ...string) (count int64, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return 0, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -226,8 +283,12 @@ func (c *Client) EstimatedDocumentCount(ctx context.Context, collectionName stri
 }
 
 // Aggregate 聚合查询
-func (c *Client) Aggregate(ctx context.Context, collectionName string, pipeline interface{}, dbName ...string) ([]map[string]interface{}, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) Aggregate(ctx context.Context, collectionName string, pipeline interface{}, dbName ...string) (results []map[string]interface{}, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -238,7 +299,6 @@ func (c *Client) Aggregate(ctx context.Context, collectionName string, pipeline 
 	}
 	defer cursor.Close(ctx)
 
-	var results []map[string]interface{}
 	if err = cursor.All(ctx, &results); err != nil {
 		return nil, err
 	}
@@ -247,8 +307,12 @@ func (c *Client) Aggregate(ctx context.Context, collectionName string, pipeline 
 }
 
 // AggregateWithDecode 聚合查询并解码到指定类型
-func (c *Client) AggregateWithDecode(ctx context.Context, collectionName string, pipeline interface{}, result interface{}, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) AggregateWithDecode(ctx context.Context, collectionName string, pipeline interface{}, result interface{}, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -267,25 +331,32 @@ func (c *Client) AggregateWithDecode(ctx context.Context, collectionName string,
 }
 
 // Distinct 获取 distinct 值
-func (c *Client) Distinct(ctx context.Context, collectionName string, fieldName string, filter interface{}, dbName ...string) ([]interface{}, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) Distinct(ctx context.Context, collectionName string, fieldName string, filter interface{}, dbName ...string) (values []interface{}, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
 	result := coll.Distinct(ctx, fieldName, filter)
-	if err := result.Err(); err != nil {
+	if err = result.Err(); err != nil {
 		return nil, err
 	}
 
-	var values []interface{}
-	err := result.Decode(&values)
+	err = result.Decode(&values)
 	return values, err
 }
 
 // CreateIndex 创建索引
-func (c *Client) CreateIndex(ctx context.Context, collectionName string, model mongo.IndexModel, dbName ...string) (string, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) CreateIndex(ctx context.Context, collectionName string, model mongo.IndexModel, dbName ...string) (name string, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return "", err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -294,8 +365,12 @@ func (c *Client) CreateIndex(ctx context.Context, collectionName string, model m
 }
 
 // CreateManyIndexes 创建多个索引
-func (c *Client) CreateManyIndexes(ctx context.Context, collectionName string, models []mongo.IndexModel, dbName ...string) ([]string, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) CreateManyIndexes(ctx context.Context, collectionName string, models []mongo.IndexModel, dbName ...string) (names []string, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -304,8 +379,12 @@ func (c *Client) CreateManyIndexes(ctx context.Context, collectionName string, m
 }
 
 // DropIndex 删除索引
-func (c *Client) DropIndex(ctx context.Context, collectionName string, indexName string, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) DropIndex(ctx context.Context, collectionName string, indexName string, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -314,8 +393,12 @@ func (c *Client) DropIndex(ctx context.Context, collectionName string, indexName
 }
 
 // DropAllIndexes 删除所有索引（除了 _id 索引）
-func (c *Client) DropAllIndexes(ctx context.Context, collectionName string, dbName ...string) error {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) DropAllIndexes(ctx context.Context, collectionName string, dbName ...string) (err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -324,8 +407,12 @@ func (c *Client) DropAllIndexes(ctx context.Context, collectionName string, dbNa
 }
 
 // ListIndexes 列出所有索引
-func (c *Client) ListIndexes(ctx context.Context, collectionName string, dbName ...string) ([]bson.M, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) ListIndexes(ctx context.Context, collectionName string, dbName ...string) (indexes []bson.M, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -336,7 +423,6 @@ func (c *Client) ListIndexes(ctx context.Context, collectionName string, dbName 
 	}
 	defer cursor.Close(ctx)
 
-	var indexes []bson.M
 	if err = cursor.All(ctx, &indexes); err != nil {
 		return nil, err
 	}
@@ -345,8 +431,12 @@ func (c *Client) ListIndexes(ctx context.Context, collectionName string, dbName 
 }
 
 // BulkWrite 批量写操作
-func (c *Client) BulkWrite(ctx context.Context, collectionName string, models []mongo.WriteModel, dbName ...string) (*mongo.BulkWriteResult, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) BulkWrite(ctx context.Context, collectionName string, models []mongo.WriteModel, dbName ...string) (result *mongo.BulkWriteResult, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -359,8 +449,12 @@ func (c *Client) BulkWrite(ctx context.Context, collectionName string, models []
 }
 
 // Watch 监听集合变更（需要副本集或分片集群）
-func (c *Client) Watch(ctx context.Context, collectionName string, pipeline interface{}, dbName ...string) (*mongo.ChangeStream, error) {
-	coll := c.Collection(collectionName, dbName...)
+func (c *Client) Watch(ctx context.Context, collectionName string, pipeline interface{}, dbName ...string) (stream *mongo.ChangeStream, err error) {
+	defer recoverToErr(&err)
+	coll, err := c.getCollection(collectionName, dbName...)
+	if err != nil {
+		return nil, err
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -369,12 +463,13 @@ func (c *Client) Watch(ctx context.Context, collectionName string, pipeline inte
 }
 
 // StartSession 启动会话
-func (c *Client) StartSession(ctx context.Context) (*mongo.Session, error) {
+func (c *Client) StartSession(ctx context.Context) (session *mongo.Session, err error) {
+	defer recoverToErr(&err)
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	session, err := c.client.StartSession()
+	session, err = c.client.StartSession()
 	if err != nil {
 		return nil, err
 	}
@@ -383,16 +478,16 @@ func (c *Client) StartSession(ctx context.Context) (*mongo.Session, error) {
 }
 
 // WithTransaction 在事务中执行操作
-func (c *Client) WithTransaction(ctx context.Context, fn func(context.Context) (interface{}, error), dbName ...string) (interface{}, error) {
+func (c *Client) WithTransaction(ctx context.Context, fn func(context.Context) (interface{}, error), dbName ...string) (result interface{}, err error) {
+	defer recoverToErr(&err)
 	if ctx == nil {
 		ctx = context.Background()
 	}
 
-	var result interface{}
-	err := c.client.UseSession(ctx, func(sc context.Context) error {
-		var err error
-		result, err = fn(sc)
-		return err
+	err = c.client.UseSession(ctx, func(sc context.Context) error {
+		var e error
+		result, e = fn(sc)
+		return e
 	})
 
 	if err != nil {
@@ -405,7 +500,8 @@ func (c *Client) WithTransaction(ctx context.Context, fn func(context.Context) (
 // ==================== 便捷方法 ====================
 
 // InsertOneWithTTL 插入带过期时间的文档（需要集合有 TTL 索引）
-func (c *Client) InsertOneWithTTL(ctx context.Context, collectionName string, document interface{}, ttl time.Duration, dbName ...string) (*mongo.InsertOneResult, error) {
+func (c *Client) InsertOneWithTTL(ctx context.Context, collectionName string, document interface{}, ttl time.Duration, dbName ...string) (result *mongo.InsertOneResult, err error) {
+	defer recoverToErr(&err)
 	// 添加过期时间字段
 	docMap, ok := document.(bson.M)
 	if !ok {
@@ -444,7 +540,8 @@ func (c *Client) DeleteByID(ctx context.Context, collectionName string, id inter
 }
 
 // FindWithPagination 分页查询
-func (c *Client) FindWithPagination(ctx context.Context, collectionName string, filter interface{}, page int64, pageSize int64, dbName ...string) ([]map[string]interface{}, int64, error) {
+func (c *Client) FindWithPagination(ctx context.Context, collectionName string, filter interface{}, page int64, pageSize int64, dbName ...string) (results []map[string]interface{}, total int64, err error) {
+	defer recoverToErr(&err)
 	if page < 1 {
 		page = 1
 	}
@@ -459,12 +556,12 @@ func (c *Client) FindWithPagination(ctx context.Context, collectionName string, 
 		SetLimit(pageSize).
 		SetSort(bson.M{"_id": -1})
 
-	results, err := c.FindWithOptions(ctx, collectionName, filter, opts, dbName...)
+	results, err = c.FindWithOptions(ctx, collectionName, filter, opts, dbName...)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	total, err := c.CountDocuments(ctx, collectionName, filter, dbName...)
+	total, err = c.CountDocuments(ctx, collectionName, filter, dbName...)
 	if err != nil {
 		return nil, 0, err
 	}

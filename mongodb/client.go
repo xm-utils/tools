@@ -2,13 +2,32 @@ package mongodb
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"go.mongodb.org/mongo-driver/v2/mongo/readpref"
 )
+
+// recoverToErr 捕获 MongoDB 调用中可能出现的 panic，并将其转换为 error 返回，
+// 避免因底层 panic 直接导致程序崩溃。
+func recoverToErr(err *error) {
+	if r := recover(); r != nil {
+		var e error
+		switch v := r.(type) {
+		case error:
+			e = v
+		default:
+			e = fmt.Errorf("%v", v)
+		}
+		if err != nil {
+			*err = fmt.Errorf("panic recovered: %w\nstack: %s", e, debug.Stack())
+		}
+	}
+}
 
 // Client MongoDB 客户端
 type Client struct {
@@ -48,7 +67,8 @@ func GetDatabase() *mongo.Database {
 }
 
 // NewClient 创建新的 MongoDB 客户端
-func NewClient(cfg *Config) (*Client, error) {
+func NewClient(cfg *Config) (result *Client, err error) {
+	defer recoverToErr(&err)
 	if cfg == nil {
 		cfg = GetDefaultConfig()
 	}
@@ -133,24 +153,24 @@ func NewClient(cfg *Config) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.ConnectTimeout)
 	defer cancel()
 
-	client, err := mongo.Connect(clientOpts)
+	mc, err := mongo.Connect(clientOpts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to MongoDB: %w", err)
 	}
 
 	// 测试连接
-	if err := client.Ping(ctx, readpref.Primary()); err != nil {
+	if err := mc.Ping(ctx, readpref.Primary()); err != nil {
 		return nil, fmt.Errorf("failed to ping MongoDB: %w", err)
 	}
 
 	// 获取数据库实例
 	var db *mongo.Database
 	if cfg.Database != "" {
-		db = client.Database(cfg.Database)
+		db = mc.Database(cfg.Database)
 	}
 
 	return &Client{
-		client:   client,
+		client:   mc,
 		database: db,
 		config:   cfg,
 	}, nil
@@ -175,7 +195,8 @@ func (c *Client) GetConfig() *Config {
 }
 
 // Ping 检查 MongoDB 连接状态
-func (c *Client) Ping(ctx context.Context) error {
+func (c *Client) Ping(ctx context.Context) (err error) {
+	defer recoverToErr(&err)
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -183,18 +204,39 @@ func (c *Client) Ping(ctx context.Context) error {
 }
 
 // Close 关闭 MongoDB 连接
-func (c *Client) Close(ctx context.Context) error {
+func (c *Client) Close(ctx context.Context) (err error) {
+	defer recoverToErr(&err)
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return c.client.Disconnect(ctx)
 }
 
-// Collection 获取集合实例
-func (c *Client) Collection(collectionName string, dbName ...string) *mongo.Collection {
+// Collection 获取集合实例。
+// 为保持向后兼容，当数据库未配置或底层发生 panic 时返回 nil，而不会导致程序崩溃。
+// 若需要获取具体错误信息，请使用内部方法 getCollection。
+func (c *Client) Collection(collectionName string, dbName ...string) (coll *mongo.Collection) {
+	defer func() {
+		if r := recover(); r != nil {
+			coll = nil
+		}
+	}()
 	db := c.GetDatabase(dbName...)
 	if db == nil {
-		panic("database not configured, please specify database name")
+		return nil
 	}
 	return db.Collection(collectionName)
+}
+
+// getCollection 获取集合实例，当数据库未配置时返回 error 而非 panic，
+// 供内部 CRUD 方法使用，以便将异常统一转换为 error 返回值。
+func (c *Client) getCollection(collectionName string, dbName ...string) (*mongo.Collection, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("mongodb client is not initialized")
+	}
+	db := c.GetDatabase(dbName...)
+	if db == nil {
+		return nil, errors.New("database not configured, please specify database name")
+	}
+	return db.Collection(collectionName), nil
 }

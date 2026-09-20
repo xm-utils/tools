@@ -2,11 +2,29 @@ package database
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/beego/beego/v2/client/orm"
 	"github.com/beego/beego/v2/client/orm/clauses/order_clause"
 	"github.com/xm-utils/tools/common"
 )
+
+// recoverToErr 捕获 beego orm 调用中可能出现的 panic，并将其转换为 error 返回，
+// 避免因底层 panic 直接导致程序崩溃。
+func recoverToErr(err *error) {
+	if r := recover(); r != nil {
+		var e error
+		switch v := r.(type) {
+		case error:
+			e = v
+		default:
+			e = fmt.Errorf("%v", v)
+		}
+		if err != nil {
+			*err = fmt.Errorf("panic recovered: %w\nstack: %s", e, debug.Stack())
+		}
+	}
+}
 
 type ListParam struct {
 	Param      *orm.Condition
@@ -16,7 +34,12 @@ type ListParam struct {
 	Order      []*order_clause.Order
 }
 
-func ReadOne[T any](t T, cols ...string) *T {
+func ReadOne[T any](t T, cols ...string) (result *T) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = nil
+		}
+	}()
 	if err := orm.NewOrm().Read(&t, cols...); err != nil {
 		return nil
 	}
@@ -24,7 +47,12 @@ func ReadOne[T any](t T, cols ...string) *T {
 }
 
 // FindOne 根据ID查询单条记录
-func FindOne[T any](id int64) *T {
+func FindOne[T any](id int64) (result *T) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = nil
+		}
+	}()
 	var model T
 	err := orm.NewOrm().QueryTable(&model).Filter("id", id).One(&model)
 	if err != nil {
@@ -34,6 +62,7 @@ func FindOne[T any](id int64) *T {
 }
 
 func FindAll[T any](form ListParam) (list []*T, total int64, err error) {
+	defer recoverToErr(&err)
 	query := orm.NewOrm().QueryTable(new(T))
 	if form.Param != nil && !form.Param.IsEmpty() {
 		query = query.SetCond(form.Param)
@@ -67,17 +96,21 @@ func FindAll[T any](form ListParam) (list []*T, total int64, err error) {
 }
 
 func FindList[T any](cond *orm.Condition) (list []*T, err error) {
+	defer recoverToErr(&err)
 	query := orm.NewOrm().QueryTable(new(T)).SetCond(cond)
 	list = make([]*T, 0)
 	_, err = query.All(&list)
 	return
 }
-func Count[T any](cond *orm.Condition) (int64, error) {
+func Count[T any](cond *orm.Condition) (count int64, err error) {
+	defer recoverToErr(&err)
 	query := orm.NewOrm().QueryTable(new(T)).SetCond(cond)
-	return query.Count()
+	count, err = query.Count()
+	return
 }
 
 func Update[T any](o orm.TxOrmer, form T, columns ...string) (err error) {
+	defer recoverToErr(&err)
 	if o == nil {
 		_, err = orm.NewOrm().Update(form, columns...)
 	} else {
@@ -86,7 +119,8 @@ func Update[T any](o orm.TxOrmer, form T, columns ...string) (err error) {
 	return err
 }
 
-func UpdateModel[T any](o orm.TxOrmer, old *T, form T) error {
+func UpdateModel[T any](o orm.TxOrmer, old *T, form T) (err error) {
+	defer recoverToErr(&err)
 	if old == nil {
 		return orm.ErrNoRows
 	}
@@ -99,6 +133,7 @@ func UpdateModel[T any](o orm.TxOrmer, old *T, form T) error {
 }
 
 func UpdateByCondition[T any](o orm.TxOrmer, cond *orm.Condition, param orm.Params) (err error) {
+	defer recoverToErr(&err)
 	if len(param) <= 0 {
 		return orm.ErrArgs
 	}
@@ -117,6 +152,7 @@ func UpdateByCondition[T any](o orm.TxOrmer, cond *orm.Condition, param orm.Para
 }
 
 func Delete[T any](o orm.TxOrmer, form T, cols ...string) (err error) {
+	defer recoverToErr(&err)
 	if o == nil {
 		_, err = orm.NewOrm().Delete(form, cols...)
 	} else {
@@ -126,6 +162,7 @@ func Delete[T any](o orm.TxOrmer, form T, cols ...string) (err error) {
 }
 
 func DeleteByCondition[T any](o orm.TxOrmer, cond *orm.Condition) (err error) {
+	defer recoverToErr(&err)
 	if cond.IsEmpty() {
 		return orm.ErrArgs
 	}
@@ -142,6 +179,7 @@ func DeleteByCondition[T any](o orm.TxOrmer, cond *orm.Condition) (err error) {
 }
 
 func Insert[T any](o orm.TxOrmer, form T) (err error) {
+	defer recoverToErr(&err)
 	if o == nil {
 		_, err = orm.NewOrm().Insert(form)
 	} else {
@@ -151,6 +189,7 @@ func Insert[T any](o orm.TxOrmer, form T) (err error) {
 }
 
 func InsertBatch(o orm.TxOrmer, bulk int, m interface{}) (i int64, err error) {
+	defer recoverToErr(&err)
 	if o == nil {
 		i, err = orm.NewOrm().InsertMulti(bulk, m)
 	} else {

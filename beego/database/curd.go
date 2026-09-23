@@ -71,7 +71,13 @@ func FindAll[T any](form ListParam) (list []*T, total int64, err error) {
 	if timeParam != nil && timeParam.IsValid() {
 		column := form.TimeColumn
 		start, end := timeParam.GetTime()
-		query = query.Filter(fmt.Sprintf("%s__gte", column), start).Filter(fmt.Sprintf("%s__lte", column), end)
+		// 结束时间只传日期(如 2006-01-02)时，解析结果为当天 00:00:00，
+		// 需补全为当天结束时间 23:59:59，避免 __lte 闭区间漏掉当天整天的数据
+		if len(timeParam.EndTime) <= 10 {
+			end = common.EndByTime(end)
+		}
+		query = query.Filter(fmt.Sprintf("%s__gte", column), start).
+			Filter(fmt.Sprintf("%s__lte", column), end)
 	}
 
 	total, err = query.Count()

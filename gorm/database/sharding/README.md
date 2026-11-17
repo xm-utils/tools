@@ -222,7 +222,7 @@ config := sharding.Config{
 |------|------|------|--------|
 | `ShardingType` | string | 分片类型: `"modulus"` 或 `"time_range"` | `"modulus"` |
 | `ShardingKey` | string | 用于分片的字段名 | - |
-| `NumberOfShards` | uint | 分片数量 (仅取模分片) | - |
+| `NumberOfShards` | uint | 分片数量 (仅取模分片)。表后缀宽度按十进制位数自动生成: 10→`_0`..`_9`, 10000→`_0000`..`_09999`, 更大分片数同理 | - |
 | `TimeColumn` | string | 时间字段名 (仅时间范围分片) | `"created_at"` |
 | `TimeRangeFormat` | string | 时间格式: `"year"`, `"month"`, `"week"`, `"day"` | `"month"` |
 | `DoubleWrite` | bool | 是否双写到主表 | `false` |
@@ -265,14 +265,18 @@ config := sharding.Config{
 1. **时间范围分片**: 
    - 表会根据需要动态创建,建议定期预创建未来时间的表
    - 使用 `GenerateTimeRangeTables` 工具函数批量生成表名
+   - **查询路由**: WHERE 条件中的分片时间字段支持 `=`、`>`、`>=`、`<`、`<=` 及 `BETWEEN`(取下界)定位分片;不含量时间字段的查询会报 `ErrMissingShardingKey`
+   - **AutoMigrate**: 时间范围分片默认不预生成所有历史/未来周期表后缀,`AutoMigrate` 时若未显式提供 `ShardingSuffixs`,仅回退创建「当前周期」表以保证首次启动可用;历史与后续周期表需通过 `GenerateTimeRangeTables` + 显式建表创建
 
 2. **取模分片**:
    - 需要在初始化时确定分片数量
    - 分片数量确定后不建议修改
+   - 表后缀宽度随 `NumberOfShards` 位数自动扩展(≥10000 也不会退化为空后缀)
 
 3. **主键生成**:
    - 推荐使用 `PKSnowflake` (雪花算法)
    - 确保分布式环境下的唯一性
+   - 雪花节点按需惰性创建;`NumberOfShards` 配合 `PKSnowflake` 时不得超过 1024(合法节点 index 范围 0..1023),超限时 `compile` 返回明确 error 而非 panic
 
 4. **查询优化**:
    - 尽量在查询中包含包含分片键或时间字段

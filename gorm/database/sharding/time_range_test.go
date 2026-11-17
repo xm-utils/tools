@@ -3,8 +3,11 @@ package sharding
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/longbridgeapp/sqlparser"
 )
 
 func TestTimeRangeShardingAlgorithm(t *testing.T) {
@@ -357,10 +360,67 @@ func TestConfigCompilation(t *testing.T) {
 	})
 }
 
+// TestCompileSnowflakeShardsLimit 验证 P2-4：NumberOfShards 超限（>1024）且为 PKSnowflake 时，
+// compile() 返回 error 而非 panic；边界值 1024 不应报错。
+func TestCompileSnowflakeShardsLimit(t *testing.T) {
+	build := func(shards uint) *Sharding {
+		return &Sharding{
+			configs: make(map[string]Config),
+			_config: Config{
+				NumberOfShards:      shards,
+				PrimaryKeyGenerator: PKSnowflake,
+			},
+			_tables: []interface{}{"users"},
+		}
+	}
+
+	t.Run("超限返回 error 而非 panic", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("compile 不应 panic，但恢复了: %v", r)
+			}
+		}()
+		err := build(2048).compile()
+		if err == nil {
+			t.Fatal("NumberOfShards>1024 且 PKSnowflake 时 compile 应返回 error")
+		}
+		// P2-6：边界为 >1024（允许 1024），文案应为「not exceed 1024」且带上出错表名
+		if !strings.Contains(err.Error(), "should not exceed 1024") {
+			t.Errorf("错误文案应包含 'should not exceed 1024'，实际=%q", err.Error())
+		}
+		if !strings.Contains(err.Error(), `"users"`) {
+			t.Errorf("错误文案应包含出错表名，实际=%q", err.Error())
+		}
+	})
+
+	t.Run("边界 1024 不报错", func(t *testing.T) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("compile 不应 panic，但恢复了: %v", r)
+			}
+		}()
+		if err := build(1024).compile(); err != nil {
+			t.Fatalf("NumberOfShards==1024 不应报错，实际=%v", err)
+		}
+	})
+}
+
 func TestTimeStringParsing(t *testing.T) {
-	config := Config{
+	// 经由生产入口 Register + compile() 构造，拿到真实的 ShardingAlgorithm，
+	// 避免直接调用裸 Config 上未初始化的 nil 算法函数。
+	sharding := Register(Config{
 		ShardingType:    "time_range",
 		TimeRangeFormat: "month",
+	}, "orders")
+	if err := sharding.compile(); err != nil {
+		t.Fatalf("compile 失败: %v", err)
+	}
+	config, exists := sharding.configs["orders"]
+	if !exists {
+		t.Fatal("expected orders config to exist")
+	}
+	if config.ShardingAlgorithm == nil {
+		t.Fatal("expected ShardingAlgorithm to be set by compile")
 	}
 
 	tests := []struct {
@@ -395,4 +455,172 @@ func TestTimeStringParsing(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCompileModulusShardSuffixWidth 验证 P1-1：取模分片后缀宽度按 NumberOfShards 位数动态生成，
+// 修复旧实现 NumberOfShards>=10000 时 tableFormat 为空、后缀恒为空串导致数据静默误落基表的缺陷。
+func TestCompileModulusShardSuffixWidth(t *testing.T) {
+	build := func(shards uint) Config {
+		s := &Sharding{
+			configs: make(map[string]Config),
+			_config: Config{
+				NumberOfShards:        shards,
+				ShardingKey:           "uid",
+				PrimaryKeyGenerator:   PKCustom,
+				PrimaryKeyGeneratorFn: func(int64) int64 { return 0 },
+			},
+			_tables: []interface{}{"users"},
+		}
+		if err := s.compile(); err != nil {
+			t.Fatalf("shards=%d compile 失败: %v", shards, err)
+		}
+		return s.configs["users"]
+	}
+
+	cases := []struct {
+		shards     uint
+		value      any
+		wantSuffix string
+	}{
+		{10, 7, "_07"},          // 旧档 <100 -> 2 位
+		{100, 7, "_007"},        // 旧档 <1000 -> 3 位
+		{1000, 7, "_0007"},      // 旧档 <10000 -> 4 位
+		{10000, 2345, "_02345"}, // 新覆盖：>=10000 -> 5 位（旧实现此处后缀为空）
+		{100000, 1, "_000001"},  // 6 位
+	}
+
+	for _, c := range cases {
+		cfg := build(c.shards)
+		if cfg.ShardingAlgorithm == nil {
+			t.Fatalf("shards=%d: ShardingAlgorithm 不应为空", c.shards)
+		}
+		suffix, err := cfg.ShardingAlgorithm(c.value)
+		if err != nil {
+			t.Fatalf("shards=%d value=%v: 意外错误 %v", c.shards, c.value, err)
+		}
+		if suffix == "" {
+			t.Fatalf("shards=%d: 后缀不应为空（旧 bug 会静默误落基表）", c.shards)
+		}
+		if suffix != c.wantSuffix {
+			t.Errorf("shards=%d value=%v: 期望后缀 %q, 实际 %q", c.shards, c.value, c.wantSuffix, suffix)
+		}
+	}
+}
+
+// TestTimeRangeNonInsertValueRangeOps 验证 P1-2：时间范围分片路由识别 >=、<=、>、<、BETWEEN，
+// 取比较值（BETWEEN 取下界）正确路由到对应时间分片表。
+func TestTimeRangeNonInsertValueRangeOps(t *testing.T) {
+	s := Register(Config{
+		ShardingType:    "time_range",
+		ShardingKey:     "created_at",
+		TimeRangeFormat: "month",
+	}, "orders")
+	if err := s.compile(); err != nil {
+		t.Fatalf("compile 失败: %v", err)
+	}
+
+	cases := []struct {
+		name  string
+		query string
+		args  []any
+		want  string // 期望 stQuery 命中的分片表名
+	}{
+		{"gte", "SELECT * FROM orders WHERE created_at >= ?", []any{"2026-01-15 00:00:00"}, "orders_202601"},
+		{"lte", "SELECT * FROM orders WHERE created_at <= ?", []any{"2026-02-20 00:00:00"}, "orders_202602"},
+		{"gt", "SELECT * FROM orders WHERE created_at > ?", []any{"2026-03-01 00:00:00"}, "orders_202603"},
+		{"lt", "SELECT * FROM orders WHERE created_at < ?", []any{"2026-04-30 00:00:00"}, "orders_202604"},
+		{"between", "SELECT * FROM orders WHERE created_at BETWEEN ? AND ?", []any{"2026-05-01 00:00:00", "2026-07-31 00:00:00"}, "orders_202605"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, stQuery, tableName, err := s.resolve(c.query, c.args...)
+			if err != nil {
+				t.Fatalf("resolve 出错: %v", err)
+			}
+			if tableName != "orders" {
+				t.Fatalf("期望 tableName=orders, 实际=%s", tableName)
+			}
+			if !strings.Contains(stQuery, c.want) {
+				t.Errorf("期望 stQuery 含 %q, 实际=%q", c.want, stQuery)
+			}
+		})
+	}
+}
+
+// TestResolvePrimaryKeyGeneratorPanicToError 验证 P2-4：主键生成回调 panic 时，
+// resolve 应将其转为 error 返回，而不是让 panic 沿 ConnPool 执行链冒泡。
+func TestResolvePrimaryKeyGeneratorPanicToError(t *testing.T) {
+	s := Register(Config{
+		NumberOfShards:        4,
+		ShardingKey:           "uid",
+		PrimaryKeyGenerator:   PKCustom,
+		PrimaryKeyGeneratorFn: func(int64) int64 { panic("boom") },
+	}, "users")
+	if err := s.compile(); err != nil {
+		t.Fatalf("compile 失败: %v", err)
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("resolve 不应让主键生成器 panic 冒泡，实际恢复了: %v", r)
+		}
+	}()
+
+	_, _, _, err := s.resolve("INSERT INTO users (uid, name) VALUES (?, ?)", 1, "x")
+	if err == nil {
+		t.Fatal("主键生成器 panic 应被转为 error 返回")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error 应包含原始 panic 信息，实际=%q", err.Error())
+	}
+}
+
+// TestShardingBindArgOutOfRangeNoPanic 验证 P2-5：insertValue / nonInsertValue 的 id 路径
+// 对 BindExpr.Pos 越界做防护，异常 SQL 下返回明确 error 而非触发 index out of range panic。
+func TestShardingBindArgOutOfRangeNoPanic(t *testing.T) {
+	s := Register(Config{
+		NumberOfShards:        4,
+		ShardingKey:           "uid",
+		PrimaryKeyGenerator:   PKCustom,
+		PrimaryKeyGeneratorFn: func(int64) int64 { return 0 },
+	}, "users")
+	if err := s.compile(); err != nil {
+		t.Fatalf("compile 失败: %v", err)
+	}
+
+	guard := func(name string, fn func() error) {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("%s: 越界绑定参数不应 panic，实际恢复: %v", name, r)
+				}
+			}()
+			if err := fn(); err == nil {
+				t.Fatal("期望返回越界 error，实际为 nil")
+			} else if !strings.Contains(err.Error(), "out of range") {
+				t.Errorf("error 应含 out of range，实际=%q", err.Error())
+			}
+		})
+	}
+
+	// insertValue：BindExpr.Pos 超出 args 长度
+	guard("insertValue", func() error {
+		names := []*sqlparser.Ident{{Name: "uid"}}
+		exprs := []sqlparser.Expr{&sqlparser.BindExpr{Pos: 99}}
+		_, _, err := s.insertValue("uid", names, exprs)
+		return err
+	})
+
+	// nonInsertValue：id 等值路径的 BindExpr.Pos 越界
+	guard("nonInsertValue_id", func() error {
+		cond := &sqlparser.BinaryExpr{
+			X:  &sqlparser.Ident{Name: "id"},
+			Op: sqlparser.EQ,
+			Y:  &sqlparser.BindExpr{Pos: 50},
+		}
+		cfg := s.configs["users"]
+		_, _, _, err := s.nonInsertValue(cfg, cond)
+		return err
+	})
 }

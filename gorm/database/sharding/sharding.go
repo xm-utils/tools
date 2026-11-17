@@ -27,6 +27,8 @@ var (
 
 type Sharding struct {
 	*gorm.DB
+	// ConnPool 为遗留字段：switchConn 优化后连接包装改为「每语句私有 + 按需惰性」，
+	// 不再使用该共享字段（保留仅为向后兼容，始终为 nil）。
 	ConnPool       *ConnPool
 	configs        map[string]Config
 	querys         sync.Map
@@ -35,7 +37,8 @@ type Sharding struct {
 	_config Config
 	_tables []any
 
-	mutex sync.RWMutex
+	// snowflakeMu 保护 snowflakeNodes 的惰性创建与缓存写入（按需初始化后不再是 init 期一次性填充）
+	snowflakeMu sync.Mutex
 }
 
 // Config 指定分片的配置
@@ -141,7 +144,7 @@ func (s *Sharding) compile() error {
 
 	for t, c := range s.configs {
 		if c.NumberOfShards > 1024 && c.PrimaryKeyGenerator == PKSnowflake {
-			panic("Snowflake NumberOfShards should less than 1024")
+			return fmt.Errorf("table %q: Snowflake NumberOfShards should not exceed 1024", t)
 		}
 
 		if c.PrimaryKeyGenerator == PKSnowflake {
@@ -252,15 +255,12 @@ func (s *Sharding) compile() error {
 				if c.NumberOfShards == 0 {
 					return errors.New("specify NumberOfShards or ShardingAlgorithm")
 				}
-				if c.NumberOfShards < 10 {
-					c.tableFormat = "_%01d"
-				} else if c.NumberOfShards < 100 {
-					c.tableFormat = "_%02d"
-				} else if c.NumberOfShards < 1000 {
-					c.tableFormat = "_%03d"
-				} else if c.NumberOfShards < 10000 {
-					c.tableFormat = "_%04d"
-				}
+				// 按 NumberOfShards 的十进制位数动态确定后缀宽度。
+				// 旧实现仅覆盖 <10/<100/<1000/<10000 四档，NumberOfShards>=10000 时 tableFormat 为空，
+				// 使 ShardingAlgorithm 恒返回空后缀、所有数据静默误落基表。这里按位数计算宽度：
+				// 对 <10000 与旧分档结果完全一致（10->2 位、100->3 位、1000->4 位），并自然向更大分片数扩展（10000->5 位）。
+				width := len(strconv.FormatUint(uint64(c.NumberOfShards), 10))
+				c.tableFormat = fmt.Sprintf("_%%0%dd", width)
 				c.ShardingAlgorithm = func(value any) (suffix string, err error) {
 					id := 0
 					switch value := value.(type) {
@@ -348,16 +348,30 @@ func (s *Sharding) Initialize(db *gorm.DB) error {
 		}
 	}
 
-	s.snowflakeNodes = make([]*snowflake.Node, 1024)
-	for i := int64(0); i < 1024; i++ {
-		n, err := snowflake.NewNode(i)
-		if err != nil {
-			return fmt.Errorf("init snowflake node error, %w", err)
-		}
-		s.snowflakeNodes[i] = n
-	}
-
+	// Snowflake 节点改为按需惰性创建（见 snowflakeNode），避免为未使用 PKSnowflake 的场景预建 1024 个节点
 	return s.compile()
+}
+
+// snowflakeNode 按需惰性创建并缓存指定索引的 snowflake 节点，供 genSnowflakeKey 使用。
+// 索引合法域（0..1023）由 compile 的 NumberOfShards 校验保证；并发安全。
+func (s *Sharding) snowflakeNode(index int64) (*snowflake.Node, error) {
+	s.snowflakeMu.Lock()
+	defer s.snowflakeMu.Unlock()
+
+	if s.snowflakeNodes == nil {
+		s.snowflakeNodes = make([]*snowflake.Node, 1024)
+	}
+	if index < 0 || index >= int64(len(s.snowflakeNodes)) {
+		return nil, fmt.Errorf("snowflake node index out of range: %d", index)
+	}
+	if s.snowflakeNodes[index] == nil {
+		node, err := snowflake.NewNode(index)
+		if err != nil {
+			return nil, fmt.Errorf("init snowflake node %d error: %w", index, err)
+		}
+		s.snowflakeNodes[index] = node
+	}
+	return s.snowflakeNodes[index], nil
 }
 
 func (s *Sharding) registerCallbacks(db *gorm.DB) {
@@ -372,14 +386,26 @@ func (s *Sharding) registerCallbacks(db *gorm.DB) {
 func (s *Sharding) switchConn(db *gorm.DB) {
 	// 在某些情况下支持忽略分片，例如：
 	// 当启用 DoubleWrite 时，我们需要在迁移期间通过表名查询数据库模式信息
-	if _, ok := db.Get(ShardingIgnoreStoreKey); !ok {
-		s.mutex.Lock()
-		if db.Statement.ConnPool != nil {
-			s.ConnPool = &ConnPool{ConnPool: db.Statement.ConnPool, sharding: s}
-			db.Statement.ConnPool = s.ConnPool
-		}
-		s.mutex.Unlock()
+	if _, ok := db.Get(ShardingIgnoreStoreKey); ok {
+		return
 	}
+
+	cp := db.Statement.ConnPool
+	if cp == nil {
+		return
+	}
+
+	// 仅当底层连接发生变化时才重建包装：
+	// 若当前语句的连接池已是本插件的 ConnPool（底层未变），直接复用，
+	// 既避免重复包装导致 resolve 被执行两次，也省去每语句 new。
+	if sp, wrapped := cp.(*ConnPool); wrapped && sp.sharding == s {
+		return
+	}
+
+	// 包装当前语句私有的 ConnPool（事务内为 *sql.Tx，事务外为 *sql.DB）。
+	// 写入目标是每语句私有的 db.Statement.ConnPool，不涉及共享可变状态，
+	// 因此无需全局锁，可消除热点路径上的串行化开销。
+	db.Statement.ConnPool = &ConnPool{ConnPool: cp, sharding: s}
 }
 
 // resolve 将旧查询拆分为全表查询和分片表查询
@@ -481,7 +507,10 @@ func (s *Sharding) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 					}
 				}
 
-				id := r.PrimaryKeyGeneratorFn(int64(tblIdx))
+				id, err := callPKGenerator(r.PrimaryKeyGeneratorFn, int64(tblIdx))
+				if err != nil {
+					return ftQuery, stQuery, tableName, err
+				}
 				if id == 0 {
 					fillID = false
 				}
@@ -506,7 +535,7 @@ func (s *Sharding) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 		var value any
 		var id int64
 		var keyFind bool
-		value, id, keyFind, err = s.nonInsertValue(r.ShardingKey, condition, args...)
+		value, id, keyFind, err = s.nonInsertValue(r, condition, args...)
 		if err != nil {
 			return
 		}
@@ -558,6 +587,23 @@ func getSuffix(value any, id int64, keyFind bool, r Config) (suffix string, err 
 	return
 }
 
+// callPKGenerator 调用主键生成回调并将其中可能抛出的 panic 转为 error。
+// 内置生成器（如序列类）在无 error 通道时以 panic 报异常，而 resolve 处于 ConnPool 执行链上、
+// 外层无 recover；在此兜底可避免插入时因生成器 panic 直接冒泡到调用方造成崩溃。
+func callPKGenerator(fn func(int64) int64, idx int64) (id int64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			switch v := r.(type) {
+			case error:
+				err = v
+			default:
+				err = fmt.Errorf("primary key generator panic: %v", v)
+			}
+		}
+	}()
+	return fn(idx), nil
+}
+
 func (s *Sharding) insertValue(key string, names []*sqlparser.Ident, exprs []sqlparser.Expr, args ...any) (value any, keyFind bool, err error) {
 	if len(names) != len(exprs) {
 		return nil, keyFind, errors.New("列名和表达式不匹配")
@@ -567,6 +613,9 @@ func (s *Sharding) insertValue(key string, names []*sqlparser.Ident, exprs []sql
 		if name.Name == key {
 			switch expr := exprs[i].(type) {
 			case *sqlparser.BindExpr:
+				if expr.Pos < 0 || expr.Pos >= len(args) {
+					return nil, keyFind, fmt.Errorf("sharding key bind arg index %d out of range (len=%d)", expr.Pos, len(args))
+				}
 				value = args[expr.Pos]
 			case *sqlparser.StringLit:
 				value = expr.Value
@@ -586,7 +635,10 @@ func (s *Sharding) insertValue(key string, names []*sqlparser.Ident, exprs []sql
 	return
 }
 
-func (s *Sharding) nonInsertValue(key string, condition sqlparser.Expr, args ...any) (value any, id int64, keyFind bool, err error) {
+func (s *Sharding) nonInsertValue(r Config, condition sqlparser.Expr, args ...any) (value any, id int64, keyFind bool, err error) {
+	key := r.ShardingKey
+	// 对于时间范围分片，除等值外还需支持范围查询 (>, <)
+	isTimeRangeSharding := r.ShardingType == "time_range"
 	err = sqlparser.Walk(sqlparser.VisitFunc(func(node sqlparser.Node) error {
 		if n, ok := node.(*sqlparser.BinaryExpr); ok {
 			x, ok := n.X.(*sqlparser.Ident)
@@ -597,42 +649,43 @@ func (s *Sharding) nonInsertValue(key string, condition sqlparser.Expr, args ...
 				}
 			}
 			if ok {
-				// 检查是否是分片键或时间字段
-				isTimeRangeSharding := false
-				if cfg, exists := s.configs["__current_table__"]; exists && cfg.ShardingType == "time_range" {
-					isTimeRangeSharding = true
-				}
-
 				if x.Name == key && n.Op == sqlparser.EQ {
 					keyFind = true
-					switch expr := n.Y.(type) {
-					case *sqlparser.BindExpr:
-						value = args[expr.Pos]
-					case *sqlparser.StringLit:
-						value = expr.Value
-					case *sqlparser.NumberLit:
-						value = expr.Value
-					default:
-						return sqlparser.ErrNotImplemented
+					var e error
+					value, e = shardingOperandValue(n.Y, args)
+					if e != nil {
+						return e
 					}
 					return nil
-				} else if isTimeRangeSharding && x.Name == key && (n.Op == sqlparser.GT || n.Op == sqlparser.LT) {
-					// 对于时间范围分片，支持范围查询 (>, <)
+				} else if isTimeRangeSharding && x.Name == key &&
+					(n.Op == sqlparser.GT || n.Op == sqlparser.LT || n.Op == sqlparser.GE || n.Op == sqlparser.LE) {
+					// 时间范围分片：支持 >、<、>=、<= 单值范围查询，取比较右侧值路由
 					keyFind = true
-					switch expr := n.Y.(type) {
-					case *sqlparser.BindExpr:
-						value = args[expr.Pos]
-					case *sqlparser.StringLit:
-						value = expr.Value
-					case *sqlparser.NumberLit:
-						value = expr.Value
-					default:
+					var e error
+					value, e = shardingOperandValue(n.Y, args)
+					if e != nil {
+						return e
+					}
+					return nil
+				} else if isTimeRangeSharding && x.Name == key && n.Op == sqlparser.BETWEEN {
+					// 时间范围分片：col BETWEEN lo AND hi，取下界 lo 路由到对应时间分片
+					rng, isRange := n.Y.(*sqlparser.Range)
+					if !isRange {
 						return sqlparser.ErrNotImplemented
+					}
+					keyFind = true
+					var e error
+					value, e = shardingOperandValue(rng.X, args)
+					if e != nil {
+						return e
 					}
 					return nil
 				} else if x.Name == "id" && n.Op == sqlparser.EQ {
 					switch expr := n.Y.(type) {
 					case *sqlparser.BindExpr:
+						if expr.Pos < 0 || expr.Pos >= len(args) {
+							return fmt.Errorf("id bind arg index %d out of range (len=%d)", expr.Pos, len(args))
+						}
 						v := args[expr.Pos]
 						var ok bool
 						if id, ok = v.(int64); !ok {
@@ -661,6 +714,24 @@ func (s *Sharding) nonInsertValue(key string, condition sqlparser.Expr, args ...
 	}
 
 	return
+}
+
+// shardingOperandValue 从比较运算右侧表达式提取用于分片路由的标量值，
+// 支持绑定参数、字符串字面量与数字字面量；对绑定参数做下标越界保护，避免异常 SQL 触发 index panic。
+func shardingOperandValue(expr sqlparser.Expr, args []any) (any, error) {
+	switch v := expr.(type) {
+	case *sqlparser.BindExpr:
+		if v.Pos < 0 || v.Pos >= len(args) {
+			return nil, fmt.Errorf("sharding key bind arg index %d out of range (len=%d)", v.Pos, len(args))
+		}
+		return args[v.Pos], nil
+	case *sqlparser.StringLit:
+		return v.Value, nil
+	case *sqlparser.NumberLit:
+		return v.Value, nil
+	default:
+		return nil, sqlparser.ErrNotImplemented
+	}
 }
 
 func replaceOrderByTableName(orderBy []*sqlparser.OrderingTerm, oldName, newName string) []*sqlparser.OrderingTerm {

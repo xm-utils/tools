@@ -14,7 +14,12 @@ const (
 )
 
 func (s *Sharding) genSnowflakeKey(index int64) int64 {
-	return s.snowflakeNodes[index].Generate().Int64()
+	node, err := s.snowflakeNode(index)
+	if err != nil {
+		// 主键生成回调无 error 通道，与 genPostgreSQL/MySQLSequenceKey 保持一致，异常直接 panic。
+		panic(err)
+	}
+	return node.Generate().Int64()
 }
 
 // PostgreSQL sequence

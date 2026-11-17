@@ -69,9 +69,8 @@
 
 ### 文档
 
-- [x] README_SHARDING.md - 完整使用文档
+- [x] README.md - 完整使用文档
 - [x] QUICKSTART.md - 快速开始指南
-- [x] OPTIMIZATION_SUMMARY.md - 优化总结
 - [x] time_range_example.go - 代码示例
 - [x] CHECKLIST.md - 功能清单 (本文件)
 
@@ -86,9 +85,8 @@
 ### 新增的文件
 - `time_range_example.go` - 示例代码 (~160行)
 - `time_range_test.go` - 单元测试 (~340行)
-- `README_SHARDING.md` - 使用文档 (~300行)
+- `README.md` - 使用文档 (~300行)
 - `QUICKSTART.md` - 快速指南 (~220行)
-- `OPTIMIZATION_SUMMARY.md` - 优化总结 (~150行)
 - `CHECKLIST.md` - 功能清单 (本文件)
 
 ### 总计
@@ -219,7 +217,24 @@ Config{
 
 ## 📝 版本历史
 
-### v1.1.0 (2026-06-28) - 当前版本
+### v1.2.0 - 加固整改
+
+**修复**:
+- 🐛 取模分片 `NumberOfShards >= 10000` 退化为空后缀导致误路由 → 后缀宽度按位数自动生成（P1-1）
+- 🐛 time_range 路由仅识别 `GT/LT` → 扩展支持 `GE/LE/BETWEEN`（取下界）（P1-2）
+- 🐛 `Snowflake NumberOfShards > 1024` 由 panic 改为 `Initialize` 返回明确 error（P2-4/P2-6）
+- 🐛 time_range 未提供后缀时 `AutoMigrate` 报 suffixs is empty → 回退创建当前周期表（P2-1）
+- 🐛 `Initialize` 无条件预建 1024 个雪花节点 → 改为按需惰性初始化（P2-3）
+- 🐛 `switchConn` 热点路径每次重建 ConnPool → 改为底层连接未变则幂等复用（P2-2）
+- 🐛 insertValue/nonInsertValue 对 `BindExpr.Pos` 直接取 `args[pos]` 可能越界 panic → 补下界校验返回 error（P2-5）
+
+**改进**:
+- 🔒 LIKE 类条件自动转义用户输入中的 `%`/`_`/反斜杠（主包 P1-3）
+- 🔒 `FindList`/`Count` 补空 `Condition` 守卫（主包 P2-2）
+- 🔒 `Reader.getDB` 去 panic、主键生成器 panic 兜底转 error（主包 P2-3/P2-4）
+- 📚 config 必填字段校验与多份文档同步更新（主包 P3）
+
+### v1.1.0 (2026-06-28)
 
 **新增:**
 - ✨ 时间范围分片功能

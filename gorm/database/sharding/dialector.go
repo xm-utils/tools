@@ -2,6 +2,7 @@ package sharding
 
 import (
 	"fmt"
+	"time"
 
 	"gorm.io/gorm/migrator"
 	"gorm.io/gorm/schema"
@@ -111,8 +112,16 @@ func (m ShardingMigrator) splitShardingDsts(dsts ...any) (shardingDsts []shardin
 		if cfg, ok := m.sharding.configs[stmt.Table]; ok {
 			// support sharding table
 			suffixs := cfg.ShardingSuffixs()
+			// 时间范围分片默认不预生成所有历史/未来周期表后缀；AutoMigrate 时若未提供后缀，
+			// 至少创建「当前周期」表，保证应用首次启动可用。历史与后续周期表应通过
+			// GenerateTimeRangeTables + 显式建表创建。取模分片不受影响（其后缀恒非空）。
+			if len(suffixs) == 0 && cfg.ShardingType == "time_range" && cfg.ShardingAlgorithm != nil {
+				if suffix, suffErr := cfg.ShardingAlgorithm(time.Now()); suffErr == nil && suffix != "" {
+					suffixs = []string{suffix}
+				}
+			}
 			if len(suffixs) == 0 {
-				err = fmt.Errorf("sharding table:%s suffixs is empty", stmt.Table)
+				err = fmt.Errorf("sharding table:%s suffixs is empty（time_range 分片请设置 ShardingSuffixs 或确保 ShardingAlgorithm 可用）", stmt.Table)
 				return
 			}
 

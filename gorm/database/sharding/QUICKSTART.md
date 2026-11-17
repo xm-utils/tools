@@ -198,19 +198,19 @@ db.Find(&orders)
 
 ### Q4: 需要手动创建表吗?
 
-A: 不需要,表会按需自动创建。但建议定期预创建未来时间的表以提升性能。
+A: 取模分片表由 `AutoMigrate` 按 `NumberOfShards` 全部创建。时间范围分片不会预生成所有历史/未来周期表——`AutoMigrate` 仅回退创建「当前周期」表以保证首次启动可用,历史与后续周期表建议用 `GenerateTimeRangeTables` 批量生成表名后显式建表。
 
 ## 下一步
 
-- 📖 查看 [README_SHARDING.md](README_SHARDING.md) 获取完整文档
+- 📖 查看 [README.md](README.md) 获取完整文档
 - 💡 查看 [time_range_example.go](time_range_example.go) 获取更多示例
 - 🧪 查看 [time_range_test.go](time_range_test.go) 了解测试用例
 
 ## 技术支持
 
 如有问题,请查看:
-1. OPTIMIZATION_SUMMARY.md - 优化总结
-2. README_SHARDING.md - 详细使用文档
+1. [README.md](README.md) - 详细使用文档与注意事项
+2. [CHECKLIST.md](CHECKLIST.md) - 功能与优化清单
 3. 运行测试用例验证功能
 
 祝使用愉快! 🎉

@@ -1,0 +1,68 @@
+# GORM Database 配置示例文件
+# 将此文件保存为 database.yaml 并在应用中加载（如配合 viper），字段说明见行内注释
+# 对应结构体：database.MysqlConfig（模块 github.com/xm-utils/tools/gorm/database）
+
+# ==================== 单实例（开发环境最简配置） ====================
+# 必填：db_user / db_host / db_port / db_name（缺失时 InitGorm 返回明确 error，不会连库后才报晦涩错误）
+# 允许为空：db_pwd（部分环境允许空密码）
+db_alias: "default"           # 连接名称（仅标识用，单例模式下不参与路由）
+db_name: "mydb"               # 数据库名称
+db_user: "root"               # 数据库连接用户名（必填）
+db_pwd: "password"            # 数据库连接密码
+db_host: "127.0.0.1"          # 数据库IP（域名）（必填）
+db_port: "3306"               # 数据库端口（必填）
+db_debug: "false"             # 是否调试模式："true" 打印 SQL 日志（注意是字符串，非 bool）
+db_table_prefix: ""           # 表前缀，如 "app_" 时模型表名 users -> app_users
+db_charset: "utf8mb4"         # 字符集类型，留空默认 utf8mb4
+db_location: "Asia/Shanghai"  # 时区，留空默认 Local
+db_log_dir: ""                # 日志目录（预留，当前版本未使用）
+
+# ==================== 连接池配置（均可留空，使用括号内默认值） ====================
+db_max_idle_conns: 10         # 最大空闲连接数（默认 10）
+db_max_open_conns: 100        # 最大打开连接数（默认 100）
+db_conn_max_lifetime: 3600    # 连接最大存活时间/秒（默认 3600）
+db_conn_max_idle_time: 600    # 连接最大空闲时间/秒（默认 600）
+
+# ==================== 一主多从读写分离（可选，整段留空则全部读写走主库） ====================
+# 主库即上方 db_host/db_port/db_user/db_pwd/db_name（唯一写库）
+# 从库节点 user/pwd/database/charset/location 留空时自动继承主库，通常只需填 host/port
+# 注意：模型需实现 ReplicaReader 接口并经 database.RegisterModels 注册，其表读操作才会走从库；
+# 未声明的表读写仍全部走主库（详见 README「仅部分表读走从库」）
+db_slaves:
+  - host: "10.0.1.1"          # 数据库IP（域名）（从节点必填）
+    port: "3306"              # 数据库端口（从节点必填）
+    user: ""                  # 用户名，留空继承主库
+    pwd: ""                   # 密码，留空继承主库
+    database: ""              # 库名，留空继承主库
+    charset: ""               # 字符集，留空继承主库
+    location: ""              # 时区，留空继承主库
+  - host: "10.0.1.2"
+    port: "3306"
+  # 更多从库可继续追加，读请求由 RandomPolicy 在从库间随机负载均衡
+
+# 多从场景下连接池参数会同时下发到主连接与每个从库连接池（每个从库独立一套）。
+
+# ==================== 加载示例（viper） ====================
+# import (
+#     "log"
+#
+#     "github.com/spf13/viper"
+#     "github.com/xm-utils/tools/gorm/database"
+# )
+#
+# func main() {
+#     viper.SetConfigFile("database.yaml")
+#     if err := viper.ReadInConfig(); err != nil {
+#         log.Fatalf("Failed to read config: %v", err)
+#     }
+#
+#     var config database.MysqlConfig
+#     if err := viper.Unmarshal(&config); err != nil {
+#         log.Fatalf("Failed to unmarshal config: %v", err)
+#     }
+#
+#     // InitGorm 基于 sync.Once，进程内仅真正初始化一次，重复调用安全幂等
+#     if err := database.InitGorm(&config); err != nil {
+#         log.Fatalf("Failed to init database: %v", err)
+#     }
+# }

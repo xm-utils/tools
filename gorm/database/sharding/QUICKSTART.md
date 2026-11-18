@@ -5,8 +5,8 @@
 ### 1. 安装依赖
 
 ```bash
-cd /Users/zhangyuan/workspase/xm-utils/tools/database/sharding
-go mod tidy
+# sharding 与 database 同属一个模块，直接拉取即可
+go get github.com/xm-utils/tools/gorm/database
 ```
 
 ### 2. 最简单的示例
@@ -18,7 +18,7 @@ import (
     "time"
     "gorm.io/driver/mysql"
     "gorm.io/gorm"
-    "your-project/database/sharding"
+    "github.com/xm-utils/tools/gorm/database/sharding"
 )
 
 // 定义订单模型
@@ -66,7 +66,7 @@ func main() {
 ### 3. 运行测试验证
 
 ```bash
-cd database/sharding
+cd gorm/database/sharding
 go test -v -run TestTimeRangeShardingAlgorithm
 ```
 

@@ -223,7 +223,7 @@ func recoverToErr(err *error) {
 //
 // 以下包级函数均为 CtxBuilder 的薄兼容层：统一委托链式构建器并携带
 // context.Background()（在 GORM 中等价于不传 ctx），签名与原有语义保持不变
-//（如 ReadOne/FindOne 吞错返回 nil；读类函数默认强制走主库）。
+// （如 ReadOne/FindOne 吞错返回 nil；读类函数默认强制走主库）。
 
 // ReadOne 以入参结构体的非零字段作为条件查询单条记录（强制走主库），返回 *T，未命中返回 nil。
 func ReadOne[T any](t T, cols ...string) (result *T) {

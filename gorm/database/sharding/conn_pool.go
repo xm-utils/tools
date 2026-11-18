@@ -19,10 +19,6 @@ func (pool *ConnPool) String() string {
 	return "gorm:sharding:conn_pool"
 }
 
-func (pool ConnPool) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
-	return pool.ConnPool.PrepareContext(ctx, query)
-}
-
 func (pool ConnPool) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	var (
 		curTime = time.Now()
@@ -125,9 +121,5 @@ func (pool *ConnPool) Rollback() error {
 		return basePool.Rollback()
 	}
 
-	return nil
-}
-
-func (pool *ConnPool) Ping() error {
 	return nil
 }

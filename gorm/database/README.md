@@ -1,7 +1,7 @@
 # Database 数据库工具库
 
 [![Go Version](https://img.shields.io/badge/go-1.24.2+-blue.svg)](https://golang.org/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#-许可证)
 [![GORM](https://img.shields.io/badge/gorm-v1.31.2-blue.svg)](https://gorm.io/)
 
 一个基于 [GORM](https://gorm.io/) 封装的高性能 Go 语言数据库工具库，提供简洁易用的 CRUD 操作、事务管理、条件构建器等功能，并包含强大的分库分表插件支持取模分片和时间范围分片两种策略。
@@ -23,37 +23,16 @@
 - [高级功能](#高级功能)
   - [泛型支持](#泛型支持)
   - [原生 SQL](#原生-sql)
-  - [上下文支持](#上下文支持)
+  - [上下文支持（链式 CRUD）](#上下文支持)
   - [表名前缀](#表名前缀)
   - [一主多从读写分离（DBResolver）](#一主多从读写分离dbresolver)
 - [分库分表](#分库分表)
   - [取模分片](#取模分片)
   - [时间范围分片](#时间范围分片)
-  - [双写模式](#双写模式)
-  - [主键生成](#主键生成)
-- [配置说明](#配置说明)
-  - [MysqlConfig 配置结构](#mysqlconfig-配置结构)
-  - [连接池配置](#连接池配置)
-- [使用示例](#使用示例)
-  - [用户管理系统](#用户管理系统)
-  - [订单系统（分片）](#订单系统分片)
-  - [日志系统（时间分片）](#日志系统时间分片)
-  - [事务示例](#事务示例)
-- [API 参考](#api-参考)
-  - [初始化和连接](#初始化和连接)
-  - [查询 API](#查询-api)
-  - [写入 API](#写入-api)
-  - [事务 API](#事务-api)
-  - [条件构建器 API](#条件构建器-api)
-  - [分片 API](#分片-api)
-- [最佳实践](#最佳实践)
-  - [连接池调优](#连接池调优)
-  - [索引优化](#索引优化)
-  - [查询优化](#查询优化)
-  - [分片策略选择](#分片策略选择)
-- [常见问题](#常见问题)
 - [依赖](#依赖)
 - [许可证](#许可证)
+
+> ⚡ 想快速上手？阅读 [QUICKSTART.md](QUICKSTART.md)（5 分钟跑通初始化 + CRUD + 事务 + 分片）；分片细节另见 [sharding/QUICKSTART.md](sharding/QUICKSTART.md)。
 
 ## 📖 项目简介
 
@@ -85,7 +64,16 @@
 ## 🚀 安装
 
 ```bash
-go get github.com/xm-utils/tools/database
+go get github.com/xm-utils/tools/gorm/database
+```
+
+导入路径：
+
+```go
+import (
+    "github.com/xm-utils/tools/gorm/database"           // 核心 CRUD / 事务 / 条件构建器
+    "github.com/xm-utils/tools/gorm/database/sharding" // 分库分表插件
+)
 ```
 
 ### 依赖要求
@@ -111,7 +99,7 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/xm-utils/tools/database"
+    "github.com/xm-utils/tools/gorm/database"
 )
 
 func main() {
@@ -153,6 +141,8 @@ func main() {
 
 ### YAML 配置加载
 
+> 完整字段说明与多场景模板见同目录的 [config.example.yaml](config.example.yaml)（含逐行注释、从库继承说明与 viper 加载代码）。
+
 1. 创建配置文件 `database.yaml`：
 
 ```yaml
@@ -188,7 +178,7 @@ package main
 import (
     "log"
     "github.com/spf13/viper"
-    "github.com/xm-utils/tools/database"
+    "github.com/xm-utils/tools/gorm/database"
 )
 
 func main() {
@@ -339,6 +329,12 @@ err := database.Update[User](nil, user)
 
 // 更新指定字段
 err = database.Update[User](nil, user, "age", "status")
+
+// 差异更新：比对 old 与 form，仅把 form 中非空且变化的字段写库（Select 只这些列）
+// 不传 whereCols 按主键更新；传入 whereCols（Go 字段名）则在主键条件上追加这些字段的值作为额外 WHERE（AND）
+// 无差异时直接返回 nil
+err = database.UpdateModel[User](nil, old, form)
+err = database.UpdateModel[User](tx, old, form, "Status")
 
 // 根据条件批量更新（条件为 *Condition）
 cond := database.Eq("username", "zhangsan")
@@ -575,15 +571,29 @@ summaries, err := database.Raw[UserSummary](
 
 ### 上下文支持
 
+带 `context` 的操作统一走链式构建器 `Ctx[T](ctx)`：链式方法仅记录意图，终端操作（FindOne/FindAll/Insert/Update/Delete/Exec 等）才执行 SQL；`ctx` 超时或取消时进行中的查询立即中断并返回对应错误。
+
 ```go
-// 带上下文的数据库操作
 ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 defer cancel()
 
-db := database.WithContext(ctx)
-var users []*User
-db.Where("status = ?", 1).Find(&users)
+// 读：条件 + 排序 + 分页
+users, total, err := database.Ctx[User](ctx).
+    Where(database.Eq("status", 1)).
+    Order("-created_at", "id").
+    Page(&PageParam{PageNum: 1, PageSize: 20}).
+    FindAll()
+
+// 读：强制走主库（写后立读避免主从延迟）
+user, err := database.Ctx[User](ctx).Primary().FindOne(1001)
+
+// 写：在事务中按条件批量更新
+err = database.Ctx[User](ctx).Tx(tx).
+    Where(database.Eq("status", 1)).
+    UpdateByCondition(map[string]interface{}{"status": 0})
 ```
+
+> 链式 API 与包级函数的关系：包级 `ReadOne/FindAll/Update` 等均为 `CtxBuilder` 的薄兼容层（携带 `context.Background()`，读类默认强制主库），两套签名一致，按需选用。
 
 ### 表名前缀
 
@@ -659,7 +669,7 @@ users, total, err := database.FindAll[User](param) // 读 → 从库
 database.Insert[User](nil, user)                     // 写 → 主库
 ```
 
-> 说明：`GetDB(alias...)` 的 `alias` 参数保留仅为向后兼容，不再用于选择独立连接实例。若需要强制走主库查询（如“写后立读”避免主从延迟），可使用 `db.Clauses(dbresolver.Write)`。
+> 说明：若需强制单条查询走主库（如“写后立读”避免主从延迟），可使用 `db.Clauses(dbresolver.Write)`，或用链式 API `database.Ctx[User](ctx).Primary().FindOne(id)`。
 
 #### 仅部分表读走从库（模型声明 + 初始化扫描）
 
@@ -713,6 +723,20 @@ dbresolver.Register(dbresolver.Config{Replicas: ..., Policy: dbresolver.RandomPo
 - `ReadFromReplica()` 可根据环境变量/配置动态返回（如仅生产环境开从库），扫描在 `InitGorm` 时一次性完成。
 - 强制单条查询走主库（如“写后立读”避免主从延迟）：对该表用 `db.Clauses(dbresolver.Write)`。
 
+#### 显式路由读器：Primary / Replica
+
+除链式 `Ctx[T](ctx).Primary()/.Replica()` 外，还提供包级读器 `database.Primary[T]()` / `database.Replica[T]()`（默认携带 `context.Background()`）：每次调用构造全新构建器，链式条件不会在多次调用间累积；未命中从库表时自动回落主库。
+
+```go
+// 强制走主库读（适合写后立读）
+user := database.Primary[User]().FindOne(1001)              // 吞错返回 nil，未命中为 nil
+users, total, err := database.Primary[User]().FindAll(param)
+
+// 尝试走从库读（未注册从库的表回落主库）
+count, err := database.Replica[User]().Count(database.Eq("status", 1))
+list, err := database.Replica[User]().FindList(cond)
+```
+
 ## 🗂️ 分库分表
 
 本库提供了强大的分片插件，支持两种分片策略：**取模分片**和**时间范围分片**。
@@ -727,7 +751,7 @@ dbresolver.Register(dbresolver.Config{Replicas: ..., Policy: dbresolver.RandomPo
 package main
 
 import (
-    "github.com/xm-utils/tools/database/sharding"
+    "github.com/xm-utils/tools/gorm/database/sharding"
     "gorm.io/driver/mysql"
     "gorm.io/gorm"
 )
@@ -888,3 +912,24 @@ db.Create(log)
 - **Snowflake 主键**：`NumberOfShards` 配合 `PKSnowflake` 时不得超过 1024（合法节点 index 0..1023），超限时 `Initialize` 返回明确 error；雪花节点按需惰性创建，不再启动时预建 1024 个。
 
 > 更多分片细节见 [sharding/README.md](sharding/README.md) 与 [sharding/QUICKSTART.md](sharding/QUICKSTART.md)。
+
+## 📦 依赖
+
+运行时直接依赖（见 `go.mod`，模块路径 `github.com/xm-utils/tools/gorm/database`）：
+
+| 依赖 | 版本 | 用途 |
+| --- | --- | --- |
+| `gorm.io/gorm` | v1.31.2+ | ORM 核心 |
+| `gorm.io/driver/mysql` | v1.6.0+ | MySQL 驱动 |
+| `gorm.io/plugin/dbresolver` | v1.6.2 | 一主多从读写分离 |
+| `github.com/xm-utils/tools/common` | v0.0.16 | 结构体差异比对（UpdateModel） |
+| `github.com/bwmarrin/snowflake` | v0.3.0 | 分片雪花主键生成 |
+| `github.com/longbridgeapp/sqlparser` | v0.3.2 | 分片 SQL 解析与路由 |
+| `github.com/google/go-querystring` | v1.2.0 | DSN 参数编码 |
+| `github.com/sirupsen/logrus` | v1.10.2 | 日志输出 |
+
+仅测试依赖：`github.com/glebarez/sqlite`（单元测试以 SQLite 内存库模拟 MySQL，不进入生产链路）。
+
+## 📄 许可证
+
+MIT

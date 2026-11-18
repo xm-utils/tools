@@ -217,8 +217,6 @@ func (c *Condition) inList(b bool, op, col string, args any) *Condition {
 }
 
 // likeValue 构造 LIKE 的匹配值：将 arg 转为字符串并按需在前/后添加 % 通配符。
-// 之前的实现把 " %%"/" %%%" 作为 Sprintf 的参数传入，%% 不会被转义，导致生成
-// 带前导空格与双/三百分号的错误值；这里统一用字符串拼接修正。
 // 同时对值中的 LIKE 特殊字符（\ % _）做转义，保证用户输入按字面量匹配（避免把
 // 用户输入的 % 或 _ 误当通配符），MySQL 默认转义符为反斜杠。
 func likeValue(arg any, prefix, suffix bool) string {

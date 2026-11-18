@@ -27,9 +27,6 @@ var (
 
 type Sharding struct {
 	*gorm.DB
-	// ConnPool 为遗留字段：switchConn 优化后连接包装改为「每语句私有 + 按需惰性」，
-	// 不再使用该共享字段（保留仅为向后兼容，始终为 nil）。
-	ConnPool       *ConnPool
 	configs        map[string]Config
 	querys         sync.Map
 	snowflakeNodes []*snowflake.Node
@@ -53,7 +50,7 @@ type Config struct {
 	// NumberOfShards 指定要分多少个表
 	NumberOfShards uint
 
-	// tableFormat 指定分片表后缀格式
+	// tableFormat 分片表后缀格式，由 compile 在取模分片时按 NumberOfShards 位数自动生成，外部无需指定
 	tableFormat string
 
 	// ShardingType 分片类型: "modulus"(取模) 或 "time_range"(时间范围)
@@ -256,9 +253,8 @@ func (s *Sharding) compile() error {
 					return errors.New("specify NumberOfShards or ShardingAlgorithm")
 				}
 				// 按 NumberOfShards 的十进制位数动态确定后缀宽度。
-				// 旧实现仅覆盖 <10/<100/<1000/<10000 四档，NumberOfShards>=10000 时 tableFormat 为空，
-				// 使 ShardingAlgorithm 恒返回空后缀、所有数据静默误落基表。这里按位数计算宽度：
-				// 对 <10000 与旧分档结果完全一致（10->2 位、100->3 位、1000->4 位），并自然向更大分片数扩展（10000->5 位）。
+				// 按 NumberOfShards 的十进制位数动态确定后缀宽度，
+				// 保证任意分片数（含 >=10000）都能生成非空后缀，避免空格式串导致数据静默误落基表。
 				width := len(strconv.FormatUint(uint64(c.NumberOfShards), 10))
 				c.tableFormat = fmt.Sprintf("_%%0%dd", width)
 				c.ShardingAlgorithm = func(value any) (suffix string, err error) {
@@ -466,7 +462,6 @@ func (s *Sharding) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 		var newTable *sqlparser.TableName
 		for _, insertExpression := range insertExpressions {
 			var value any
-			var id int64
 			var keyFind bool
 			columnNames := insertNames
 			insertValues := insertExpression.Exprs
@@ -476,7 +471,8 @@ func (s *Sharding) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 			}
 
 			var subSuffix string
-			subSuffix, err = getSuffix(value, id, keyFind, r)
+			// 插入路径已命中分片键（keyFind 为 true），id 恒不参与路由
+			subSuffix, err = getSuffix(value, 0, keyFind, r)
 			if err != nil {
 				return
 			}
@@ -491,37 +487,32 @@ func (s *Sharding) resolve(query string, args ...any) (ftQuery, stQuery, tableNa
 			newTable = &sqlparser.TableName{Name: &sqlparser.Ident{Name: tableName + suffix}}
 
 			fillID := true
-			if isInsert {
-				for _, name := range insertNames {
-					if name.Name == "id" {
-						fillID = false
-						break
-					}
-				}
-				suffixWord := strings.Replace(suffix, "_", "", 1)
-				tblIdx, err := strconv.Atoi(suffixWord)
-				if err != nil {
-					tblIdx = slices.Index(r.ShardingSuffixs(), suffix)
-					if tblIdx == -1 {
-						return ftQuery, stQuery, tableName, errors.New("表后缀 '" + suffix + "' 不在 ShardingSuffixs 中。为了生成主键，ShardingSuffixs 应该包含所有表后缀")
-					}
-				}
-
-				id, err := callPKGenerator(r.PrimaryKeyGeneratorFn, int64(tblIdx))
-				if err != nil {
-					return ftQuery, stQuery, tableName, err
-				}
-				if id == 0 {
+			for _, name := range insertNames {
+				if name.Name == "id" {
 					fillID = false
+					break
 				}
-
-				if fillID {
-					columnNames = append(insertNames, &sqlparser.Ident{Name: "id"})
-					insertValues = append(insertValues, &sqlparser.NumberLit{Value: strconv.FormatInt(id, 10)})
+			}
+			suffixWord := strings.Replace(suffix, "_", "", 1)
+			tblIdx, tErr := strconv.Atoi(suffixWord)
+			if tErr != nil {
+				tblIdx = slices.Index(r.ShardingSuffixs(), suffix)
+				if tblIdx == -1 {
+					return ftQuery, stQuery, tableName, errors.New("表后缀 '" + suffix + "' 不在 ShardingSuffixs 中。为了生成主键，ShardingSuffixs 应该包含所有表后缀")
 				}
 			}
 
+			id, idErr := callPKGenerator(r.PrimaryKeyGeneratorFn, int64(tblIdx))
+			if idErr != nil {
+				return ftQuery, stQuery, tableName, idErr
+			}
+			if id == 0 {
+				fillID = false
+			}
+
 			if fillID {
+				columnNames = append(insertNames, &sqlparser.Ident{Name: "id"})
+				insertValues = append(insertValues, &sqlparser.NumberLit{Value: strconv.FormatInt(id, 10)})
 				insertStmt.ColumnNames = columnNames
 				insertExpression.Exprs = insertValues
 			}

@@ -6,11 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime/debug"
 	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"github.com/xm-utils/tools/common"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -202,85 +202,72 @@ func setConnectionPool(sqlDB *sql.DB, config *MysqlConfig) {
 		maxIdle, maxOpen, lifetime, idleTime)
 }
 
+// recoverToErr 捕获底层调用中可能出现的 panic，并将其转换为 error 返回，
+// 避免因底层 panic 直接导致程序崩溃。err 为命名返回值的地址。
+func recoverToErr(err *error) {
+	if r := recover(); r != nil {
+		var e error
+		switch v := r.(type) {
+		case error:
+			e = v
+		default:
+			e = fmt.Errorf("%v", v)
+		}
+		if err != nil {
+			*err = fmt.Errorf("panic recovered: %w\nstack: %s", e, debug.Stack())
+		}
+	}
+}
+
 // ------------------[GORM 通用工具函数]-------------------
+//
+// 以下包级函数均为 CtxBuilder 的薄兼容层：统一委托链式构建器并携带
+// context.Background()（在 GORM 中等价于不传 ctx），签名与原有语义保持不变
+//（如 ReadOne/FindOne 吞错返回 nil；读类函数默认强制走主库）。
 
 // ReadOne 以入参结构体的非零字段作为条件查询单条记录（强制走主库），返回 *T，未命中返回 nil。
 func ReadOne[T any](t T, cols ...string) (result *T) {
-	return Primary[T]().ReadOne(t, cols...)
+	result, _ = Ctx[T](context.Background()).Primary().ReadOne(t, cols...)
+	return
 }
 
 // FindOne 根据ID查询单条记录
 func FindOne[T any](id int64) *T {
-	return Primary[T]().FindOne(id)
+	result, _ := Ctx[T](context.Background()).Primary().FindOne(id)
+	return result
 }
 
 // FindAll 分页查询列表
 func FindAll[T any](param ListParam) (list []*T, total int64, err error) {
-	return Primary[T]().FindAll(param)
+	return Ctx[T](context.Background()).Primary().ApplyListParam(param).FindAll()
 }
 
 // FindList 查询列表（不分页）
 func FindList[T any](cond *Condition, page ...PageParam) ([]*T, error) {
-	return Primary[T]().FindList(cond, page...)
+	b := Ctx[T](context.Background()).Primary().Where(cond)
+	if len(page) > 0 {
+		b = b.Page(page[0])
+	}
+	return b.FindList()
 }
 
 // Count 统计数量
 func Count[T any](cond *Condition) (int64, error) {
-	return Primary[T]().Count(cond)
+	return Ctx[T](context.Background()).Primary().Where(cond).Count()
 }
 
 // Update 更新记录（仅更新非零字段；指定 columns 时只更新这些列）
 func Update[T any](tx *gorm.DB, data *T, columns ...string) (err error) {
-	defer recoverToErr(&err)
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-
-	db = db.Model(data)
-	if len(columns) > 0 {
-		db = db.Select(columns)
-	}
-
-	return db.Updates(data).Error
+	return Ctx[T](context.Background()).Tx(tx).Update(data, columns...)
 }
 
 // UpdateModel 比对 old 与 form，将 form 中非空且发生变化的差异字段更新到数据库（Select 只写这些列）。
-//   - 不传 whereCols：按主键更新（与 beego/database 的 UpdateModel 语义一致，复用 Update）；
+//   - 不传 whereCols：按主键更新（与 beego/database 的 UpdateModel 语义一致）；
 //   - 传入 whereCols（Go 字段名）：在保留主键条件的基础上，追加 form 中这些字段的值作为额外 WHERE 条件（两者 AND）。
 //
 // 无差异时直接返回 nil；old 为空指针时返回 gorm.ErrRecordNotFound。
 func UpdateModel[T any](tx *gorm.DB, old *T, form T, whereCols ...string) (err error) {
-	defer recoverToErr(&err)
-	if old == nil {
-		return gorm.ErrRecordNotFound
-	}
-
-	var fields []string
-	old, fields = common.CompareAndAssign(old, form)
-	if len(fields) == 0 {
-		return nil
-	}
-
-	// 无匹配字段：按主键更新（保持原有语义）
-	if len(whereCols) == 0 {
-		return Update(tx, old, fields...)
-	}
-
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-	// whereCols 指定字段（值取自 form）作为额外 WHERE 条件；
-	// 以 old 作为 Model 目标保留主键条件，最终 WHERE = 主键 AND whereCols 字段。
-	cond := pickFields(form, whereCols)
-	return db.Model(old).Where(&cond).Select(fields).Updates(old).Error
+	return Ctx[T](context.Background()).Tx(tx).UpdateModel(old, form, whereCols...)
 }
 
 // pickFields 返回 src 的浅拷贝，仅保留 cols 指定的字段（按 Go 字段名匹配），其余字段置零。
@@ -312,139 +299,36 @@ func pickFields[T any](src T, cols []string) T {
 
 // UpdateByCondition 根据条件批量更新指定字段
 func UpdateByCondition[T any](tx *gorm.DB, cond *Condition, updates map[string]interface{}) (err error) {
-	defer recoverToErr(&err)
-	if len(updates) == 0 {
-		return errors.New("updates cannot be empty")
-	}
-
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-	if cond == nil || cond.IsEmpty() {
-		return errors.New("condition cannot be empty")
-	}
-	var model T
-	query := db.Model(&model)
-
-	q, v := cond.GormWhere()
-	query = query.Where(q, v...)
-
-	return query.Updates(updates).Error
+	return Ctx[T](context.Background()).Tx(tx).Where(cond).UpdateByCondition(updates)
 }
 
 // Delete 删除记录
 func Delete[T any](tx *gorm.DB, data *T) (err error) {
-	defer recoverToErr(&err)
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-	return db.Delete(data).Error
+	return Ctx[T](context.Background()).Tx(tx).Delete(data)
 }
 
 // DeleteByCondition 根据条件删除
 func DeleteByCondition[T any](tx *gorm.DB, cond *Condition) (err error) {
-	defer recoverToErr(&err)
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-	if cond == nil || cond.IsEmpty() {
-		return errors.New("condition cannot be empty")
-	}
-
-	var model T
-	q, v := cond.GormWhere()
-	return db.Model(&model).Where(q, v...).Delete(&model).Error
+	return Ctx[T](context.Background()).Tx(tx).Where(cond).DeleteByCondition()
 }
 
 // Insert 插入记录
 func Insert[T any](tx *gorm.DB, data *T) (err error) {
-	defer recoverToErr(&err)
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-	return db.Create(data).Error
+	return Ctx[T](context.Background()).Tx(tx).Insert(data)
 }
 
 // InsertBatch 批量插入，返回累计影响行数
 func InsertBatch[T any](tx *gorm.DB, batchSize int, dataList []*T) (affected int64, err error) {
-	defer recoverToErr(&err)
-	if len(dataList) == 0 {
-		return 0, nil
-	}
-
-	db := tx
-	if db == nil {
-		db = GetDB()
-	}
-	if db == nil {
-		return 0, errors.New("database connection not found")
-	}
-	if batchSize <= 0 {
-		batchSize = len(dataList)
-	}
-
-	// 分批插入
-	total := len(dataList)
-	for i := 0; i < total; i += batchSize {
-		end := i + batchSize
-		if end > total {
-			end = total
-		}
-
-		batch := dataList[i:end]
-		res := db.CreateInBatches(batch, batchSize)
-		if res.Error != nil {
-			return affected, res.Error
-		}
-		affected += res.RowsAffected
-	}
-
-	return affected, nil
+	return Ctx[T](context.Background()).Tx(tx).InsertBatch(batchSize, dataList)
 }
 
 // Exec 执行原生SQL
 func Exec(sql string, values ...interface{}) error {
-	db := GetDB()
-	if db == nil {
-		return errors.New("database connection not found")
-	}
-
-	return db.Exec(sql, values...).Error
+	_, err := Ctx[any](context.Background()).Exec(sql, values...)
+	return err
 }
 
 // Raw 查询原生SQL
 func Raw[T any](sql string, values ...interface{}) ([]*T, error) {
-	db := GetDB()
-	if db == nil {
-		return nil, errors.New("database connection not found")
-	}
-
-	var results []*T
-	err := db.Raw(sql, values...).Scan(&results).Error
-	return results, err
-}
-
-// WithContext 带上下文的数据库操作
-func WithContext(ctx context.Context) *gorm.DB {
-	db := GetDB()
-	if db == nil {
-		return nil
-	}
-	return db.WithContext(ctx)
+	return Ctx[T](context.Background()).Raw(sql, values...)
 }

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -28,26 +29,34 @@ func TestPrimaryReplicaRoutingDirection(t *testing.T) {
 	}
 }
 
-// TestReaderGetDBAppliesOperation 验证 getDB 会把对应 Operation 注入到会话中。
-// 这里不接真实库，仅确保子句被写入 Statement.Settings（Write/Read 名称互斥）。
-func TestReaderGetDBAppliesOperation(t *testing.T) {
+// TestReaderRouteAppliesOperation 验证重构后路由提示仍会注入到会话中（经 reader() 构建的 CtxBuilder）。
+// 这里不接真实库，仅确保携带的 Operation 正确传递且 Write/Read 互斥。
+func TestReaderRouteAppliesOperation(t *testing.T) {
 	gdb := openTestDB(t)
-	// 借用测试库作为单例，使 getDB 可正常返回会话
+	// 借用测试库作为单例，使 rawDB 可正常返回会话
 	restore := db
 	db = gdb
 	t.Cleanup(func() { db = restore })
 
-	primary := Primary[routeModel]().getDB()
-	if primary == nil {
-		t.Fatal("Primary getDB 返回 nil")
+	primary := Primary[routeModel]().reader()
+	session, err := primary.rawDB()
+	if err != nil || session == nil {
+		t.Fatalf("Primary rawDB 应返回会话，实际=%v, %v", session, err)
 	}
-	replica := Replica[routeModel]().getDB()
-	if replica == nil {
-		t.Fatal("Replica getDB 返回 nil")
+	if !primary.hasDo || primary.do != dbresolver.Write {
+		t.Fatalf("Primary reader 应携带 dbresolver.Write，实际 hasDo=%v do=%q", primary.hasDo, string(primary.do))
+	}
+
+	replica := Replica[routeModel]().reader()
+	if _, err := replica.rawDB(); err != nil {
+		t.Fatalf("Replica rawDB 应返回会话，实际=%v", err)
+	}
+	if !replica.hasDo || replica.do != dbresolver.Read {
+		t.Fatalf("Replica reader 应携带 dbresolver.Read，实际 hasDo=%v do=%q", replica.hasDo, string(replica.do))
 	}
 
 	// 两个读器应携带不同的路由操作，避免再次被改反
-	if Primary[routeModel]().do == Replica[routeModel]().do {
+	if primary.do == replica.do {
 		t.Fatal("Primary 与 Replica 的路由操作不应相同")
 	}
 }
@@ -86,8 +95,9 @@ func TestReaderNilDBReturnsErrorNotPanic(t *testing.T) {
 	db = nil
 	t.Cleanup(func() { db = restore })
 
-	if got := Primary[testUser]().getDB(); got != nil {
-		t.Error("未初始化时 getDB 应返回 nil")
+	// 原 getDB 返回 nil 的断言，收口后由 builder.rawDB 返回清晰 error 承接
+	if session, err := Ctx[testUser](context.Background()).rawDB(); err == nil || session != nil {
+		t.Errorf("未初始化时 rawDB 应返回 (nil, error)，实际=%v, %v", session, err)
 	}
 
 	if _, _, err := FindAll[testUser](ListParam{}); err == nil {

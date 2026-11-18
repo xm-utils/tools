@@ -170,8 +170,9 @@ func main() {
 		OnExhausted: func(msg PayMsg, failedStep string, err error) {
 			fmt.Println("重试耗尽转终态:", msg.OrderID, failedStep, err)
 		},
-		// 重试策略：内置默认实现 PolicyRetryer——指数退避 base×2^attempt（MaxDelay 封顶、
-		// 内部防移位溢出）+ Attempt 读轮次/Next 生成重投消息；饱和封顶自动转终态
+		// 重试策略：内置默认实现 PolicyRetryer——额度与退避均由 Strategy（典型为 RetryPolicy）
+		// 的 Delay 自检裁决：超额/未配退避返回 0 即不重试；指数退避 base×2^attempt
+		// （MaxDelay 封顶、内部防移位溢出，饱和未封顶同样转终态）；Next 生成重投消息
 		Retryer: &pipeline.PolicyRetryer[PayMsg]{
 			Policy:  &pipeline.RetryPolicy{MaxAttempt: 3, BaseDelay: time.Second, MaxDelay: time.Minute},
 			Attempt: func(msg PayMsg) int { return msg.Retries },
@@ -246,12 +247,12 @@ if err := e.StopWithTimeout(10 * time.Second); errors.Is(err, pipeline.ErrStopTi
 | 步骤/Resolve/钩子内可能 panic | 无需处理：全链路 recover——步骤级转 error 走重试/终态，其余转 OnFatal（需幂等） |
 | 非关键副作用（打点/通知） | `NewBestEffortStep`，失败与 panic 均忽略不中断 |
 | 停机时不想误落死信 | 无需处理：停机中断不重投/不终态；可选 `OnInterrupted` 打点观测 |
-| 退避时长不想失控 | `RetryPolicy.MaxDelay` 封顶；饱和且未封顶时自动转终态不留僵尸消息 |
+| 退避时长不想失控 | `RetryPolicy.MaxDelay` 封顶；额度耗尽/饱和未封顶时 `Delay` 返 0 或饱和，均自动转终态不留僵尸消息 |
 | 按条件执行分枝 | `NewConditionalStep`，内部失败错误含内外两层步骤名 |
 | 长时间操作响应停机 | `select ctx.Done()` 或把 `ctx` 直接传给支持 context 的 SDK |
 | 区分数据读取失败 | `errors.Is(err, ErrKeyNotFound / ErrKeyTypeMismatch)` |
 | 参数非法等永久错误 | 步骤返回 `fmt.Errorf("...: %w", pipeline.ErrNonRetryable)`，免重试直达终态 |
-| 重试策略自定义 | `Config.Retryer` 实现 `Retry(msg, failedStep, err) (next, delay, retry)`；内置 `Retry` 路径可被 `PolicyRetryer` 委托 |
+| 重试策略自定义 | `Config.Retryer` 实现 `Retry(msg, failedStep, err) (next, delay, retry)`；自定义实现可委托 `PolicyRetryer` 复用默认额度/退避 |
 | 慢步骤需要截止 | `pipeline.WithTimeout(step, d)`，仅约束遵守 ctx 的操作 |
 | 同业务对象必须串行 | `Config.MsgKeyFunc` 返回业务键，同 Key 钉定同 worker 串行 |
 | 挂死调用阻塞发布/上游故障止血 | `StopWithTimeout(d)`；`Pause()`/`Resume()` |

@@ -24,8 +24,9 @@
 - **错误分级**：步骤错误链包装 `ErrNonRetryable`（参数非法/永久失败）时跳过重试直达终态，
   不再为注定失败的校验浪费退避额度
 - **重试策略抽象**：`Retryer[M]` 接口是唯一重试入口——是否重试/等待多久/重投消息变换
-  均由使用方实现裁决（重试状态外置、按错误类别分档、动态额度）；内置默认实现
-  `PolicyRetryer`（额度 + 指数退避 `RetryPolicy`）开箱即用亦可委托复用；未配置即不重试
+  均由使用方实现裁决（重试状态外置、按错误类别分档、动态额度）；内置 `PolicyRetryer`
+  组合 `Strategy` 退避接口裁决（默认实现 `RetryPolicy`：额度在其 `Delay` 内自检，
+  返回 0 即不重试；指数退避 + 溢出防护），开箱即用亦可委托复用；未配置即不重试
 - **步骤级超时**：`WithTimeout(step, d)`（或自实现 `TimeoutDecliner`）为单步骤限定从消息级
   context 派生的超时上限，前序超时不影响后续步骤；`DeadlineExceeded` 按普通失败分派，
   不会被误判为停机中断
@@ -58,11 +59,10 @@ go get github.com/xm-utils/tools/pipeline
 Queue.Receive → Resolve(msg) → [引擎注入 msgCtx/logger] → Step 链顺序执行
     ├─ 全部成功          → OnSuccess
     ├─ Resolve 失败/链路 panic → OnFatal（不重试；panic 后状态未知，OnFatal 需幂等）
-    ├─ 步骤失败可重试    → Backoff 退避 → Queue.Submit(重投) → OnRetried
-    ├─ 错误含 ErrNonRetryable → OnExhausted（跳过重试，不耗额度）
-    ├─ 退避饱和封顶      → OnExhausted（同额度耗尽）
-    ├─ 停机中断（Stop 取消） → OnInterrupted（不重投/不终态，留待上游重投）
-    └─ 重试耗尽/步骤失败 → OnExhausted（终态回写/落死信）
+    ├─ 错误含 ErrNonRetryable → OnExhausted（短路裁决，直达终态）
+    ├─ 步骤失败            → Retryer.Retry 裁决：retry=true → Queue.Submit(延迟重投) → OnRetried
+    ├─ 未配 Retryer/裁决不重试/退避饱和 → OnExhausted（终态回写/落死信）
+    └─ 停机中断（Stop 取消） → OnInterrupted（不重投/不终态，留待上游重投）
 ```
 
 ## Config 钩子一览
@@ -72,10 +72,10 @@ Queue.Receive → Resolve(msg) → [引擎注入 msgCtx/logger] → Step 链顺�
 | `Resolve(msg)` | 每条消息开始；返回 Step 链 + 上下文（只填业务字段） |
 | `OnFatal(msg, reason)` | Resolve 失败 / 空上下文 / 全链路任意 panic，不可恢复，不重试 |
 | `OnSuccess(msg, ctx)` | 全部步骤成功（含空 Step 链的「空成功」，引擎告警） |
-| `OnRetried(msg, next, delay)` | 步骤失败且退避重投入队成功 |
+| `OnRetried(msg, next, delay)` | 步骤失败且 Retryer 裁决重投、入队成功 |
 | `OnExhausted(msg, failedStep, err)` | 步骤失败且重试裁决不重试（未配 Retryer 首次即触发；退避饱和封顶同样命中） |
 | `OnInterrupted(msg, err)` | 步骤因 Stop 停机取消而失败；仅观测用途，不改变消息终态 |
-| `Retryer` | 重试策略抽象接口（唯一重试入口）：`Retry(msg, failedStep, err) (next, delay, retry)`；nil 即不重试；内置默认实现 `PolicyRetryer{Policy, Attempt, Next}` |
+| `Retryer` | 重试策略抽象接口（唯一重试入口）：`Retry(msg, failedStep, err) (next, delay, retry)`；nil 即不重试；内置默认实现 `PolicyRetryer{Policy Strategy, Attempt, Next}`，额度由 `Strategy.Delay` 自检（返回 0 = 不重试） |
 | `MsgKeyFunc(msg)` | 返回有序键（可选）：非 nil 即启用同 Key 串行分片模式，空键降级轮询分发 |
 | `Log` | `*logrus.Entry`，缺省自动初始化为 `module=pipeline` |
 

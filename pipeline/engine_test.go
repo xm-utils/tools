@@ -261,9 +261,10 @@ func TestStepPanicRecovered(t *testing.T) {
 	}
 }
 
-// #3 Backoff 溢出封顶：负轮次/超大轮次/大基数回绕均不得产生 ≤0 的异常 delay
+// #3 Delay 溢出封顶：负轮次/超大轮次/大基数回绕均不得产生负值或错误小值 delay
+// （额度耗尽返回 0 是 Strategy 契约的合法值，另有专项断言）
 func TestBackoffOverflowCapped(t *testing.T) {
-	p := &RetryPolicy{MaxAttempt: 100, BaseDelay: time.Second}
+	p := &RetryPolicy{MaxAttempt: math.MaxInt32, BaseDelay: time.Second}
 
 	if d := p.Delay(-5); d != time.Second {
 		t.Fatalf("负轮次应按首次处理, got %v", d)
@@ -302,9 +303,21 @@ func TestBackoffOverflowCapped(t *testing.T) {
 	if d := capped.Delay(10); d != 5*time.Minute { // 1s<<10=17min > 5min 封顶
 		t.Fatalf("超封顶应截断为 MaxDelay, got %v", d)
 	}
-	hugeCap := &RetryPolicy{BaseDelay: time.Duration(math.MaxInt64), MaxDelay: time.Minute}
+	hugeCap := &RetryPolicy{MaxAttempt: 100, BaseDelay: time.Duration(math.MaxInt64), MaxDelay: time.Minute}
 	if d := hugeCap.Delay(62); d != time.Minute {
 		t.Fatalf("饱和值也应受 MaxDelay 截断, got %v", d)
+	}
+
+	// 额度自检（Strategy 的 0 契约）：attempt+1 > MaxAttempt 或 BaseDelay<=0 时返回 0
+	quota := &RetryPolicy{MaxAttempt: 2, BaseDelay: time.Second}
+	if d := quota.Delay(1); d != 2*time.Second {
+		t.Fatalf("额度内应返回退避值, got %v", d)
+	}
+	if d := quota.Delay(2); d != 0 {
+		t.Fatalf("额度耗尽应返回 0(不需重试), got %v", d)
+	}
+	if d := (&RetryPolicy{MaxAttempt: 5}).Delay(0); d != 0 {
+		t.Fatalf("BaseDelay<=0 应返回 0(不需重试), got %v", d)
 	}
 }
 
@@ -579,41 +592,82 @@ func TestBestEffortPanicNotBreakingMainFlow(t *testing.T) {
 
 // Major#4：退避饱和封顶（未设 MaxDelay）视同额度耗尽直接终态，不留僵尸消息
 func TestBackoffSaturatedMeansExhausted(t *testing.T) {
-	q := newChanQueue()
-	exhausted := make(chan string, 1)
-	var mu sync.Mutex
-	var retried int
+	// 未配 Retryer：首次失败直接终态，不重投
+	t.Run("未配Retryer首败即耗尽", func(t *testing.T) {
+		q := newChanQueue()
+		exhausted := make(chan string, 1)
+		var mu sync.Mutex
+		var retried int
 
-	e, err := New(Config[string, *BorrowOpContext]{
-		Queue:   q,
-		Workers: 1,
-		Resolve: func(msg string) ([]Step[*BorrowOpContext], *BorrowOpContext, error) {
-			return []Step[*BorrowOpContext]{failingStep{}}, &BorrowOpContext{OpNo: msg}, nil
-		},
-		OnRetried:   func(msg, next string, delay time.Duration) { mu.Lock(); retried++; mu.Unlock() },
-		OnExhausted: func(msg string, failedStep string, err error) { exhausted <- msg },
+		e, err := New(Config[string, *BorrowOpContext]{
+			Queue:   q,
+			Workers: 1,
+			Resolve: func(msg string) ([]Step[*BorrowOpContext], *BorrowOpContext, error) {
+				return []Step[*BorrowOpContext]{failingStep{}}, &BorrowOpContext{OpNo: msg}, nil
+			},
+			OnRetried:   func(msg, next string, delay time.Duration) { mu.Lock(); retried++; mu.Unlock() },
+			OnExhausted: func(msg string, failedStep string, err error) { exhausted <- msg },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := e.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		q.msgs <- "Z1"
+		select {
+		case <-exhausted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("未配 Retryer 时首次失败应落入终态处置")
+		}
+		e.Stop()
+		mu.Lock()
+		defer mu.Unlock()
+		if retried != 0 || len(q.msgs) != 0 {
+			t.Fatalf("不应重投/入队: retried=%d queue_len=%d", retried, len(q.msgs))
+		}
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
-	if err := e.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	q.msgs <- "Z1"
-	select {
-	case <-exhausted:
-	case <-time.After(3 * time.Second):
-		t.Fatal("退避饱和后未落入终态处置（僵尸消息）")
-	}
-	e.Stop()
-	mu.Lock()
-	defer mu.Unlock()
-	if retried != 0 {
-		t.Fatalf("饱和不应触发重投: retried=%d", retried)
-	}
-	if n := len(q.msgs); n != 0 {
-		t.Fatalf("饱和不应入队僵尸消息: queue_len=%d", n)
-	}
+
+	// 端到端饱和转耗尽：Strategy.Delay 饱和为 MaxInt64（未设 MaxDelay）时
+	// PolicyRetryer 裁决不重试，消息直达终态而非僵尸滞留
+	t.Run("退避饱和转耗尽", func(t *testing.T) {
+		q := newChanQueue()
+		exhausted := make(chan string, 1)
+		var mu sync.Mutex
+		var retried int
+
+		e, err := New(Config[string, *BorrowOpContext]{
+			Queue:   q,
+			Workers: 1,
+			Retryer: &PolicyRetryer[string]{
+				Policy: &RetryPolicy{MaxAttempt: 10, BaseDelay: time.Duration(math.MaxInt64)},
+				Next:   func(msg string) string { return msg },
+			},
+			Resolve: func(msg string) ([]Step[*BorrowOpContext], *BorrowOpContext, error) {
+				return []Step[*BorrowOpContext]{failingStep{}}, &BorrowOpContext{OpNo: msg}, nil
+			},
+			OnRetried:   func(msg, next string, delay time.Duration) { mu.Lock(); retried++; mu.Unlock() },
+			OnExhausted: func(msg string, failedStep string, err error) { exhausted <- msg },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := e.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		q.msgs <- "Z2"
+		select {
+		case <-exhausted:
+		case <-time.After(3 * time.Second):
+			t.Fatal("退避饱和后未落入终态处置（僵尸消息）")
+		}
+		e.Stop()
+		mu.Lock()
+		defer mu.Unlock()
+		if retried != 0 || len(q.msgs) != 0 {
+			t.Fatalf("饱和不应触发重投/入队: retried=%d queue_len=%d", retried, len(q.msgs))
+		}
+	})
 }
 
 // Minor#9：空 Step 链语义成文——视为空成功（引擎告警）并走 OnSuccess
@@ -964,6 +1018,97 @@ func TestPolicyRetryer(t *testing.T) {
 	if _, _, retry := (&PolicyRetryer[string]{Policy: policy}).Retry("m1", "s", errors.New("x")); retry {
 		t.Fatal("缺 Next 应裁决不重试而非 panic")
 	}
+	if _, _, retry := (&PolicyRetryer[string]{Policy: &RetryPolicy{MaxAttempt: 5}, Next: next}).Retry("m1", "s", errors.New("x")); retry {
+		t.Fatal("BaseDelay<=0 时 Delay 返回 0, 应裁决不重试(Strategy 的 0 契约)")
+	}
+}
+
+// enteredStep 进入执行即通知已领取，随后挂起直到 ctx 取消（停机时序配合用）
+type enteredStep struct{ entered chan struct{} }
+
+func (enteredStep) Name() string { return "entered" }
+func (s enteredStep) Execute(ctx *BorrowOpContext) error {
+	close(s.entered)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+// panic 防线覆盖分片/中断路径：OnInterrupted panic 被 interrupt 兜住；
+// MsgKeyFunc panic 被 safeKey 降级为空键（轮询），进程不崩且消息正常处理
+func TestInterruptAndKeyPanicRecovered(t *testing.T) {
+	t.Run("OnInterrupted panic 被兜住", func(t *testing.T) {
+		q := newChanQueue()
+		entered := make(chan struct{})
+		interrupted := make(chan struct{}, 1)
+		e, err := New(Config[string, *BorrowOpContext]{
+			Queue:   q,
+			Workers: 1,
+			Resolve: func(msg string) ([]Step[*BorrowOpContext], *BorrowOpContext, error) {
+				return []Step[*BorrowOpContext]{enteredStep{entered: entered}}, &BorrowOpContext{OpNo: msg}, nil
+			},
+			OnInterrupted: func(msg string, err error) {
+				select {
+				case interrupted <- struct{}{}:
+				default:
+				}
+				panic("OnInterrupted crash")
+			},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := e.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		q.msgs <- "I1"
+		<-entered
+		e.Stop() // 未兜住 panic 则测试进程直接崩溃
+		select {
+		case <-interrupted:
+		case <-time.After(2 * time.Second):
+			t.Fatal("停机未触发 OnInterrupted")
+		}
+	})
+
+	t.Run("MsgKeyFunc panic 降级轮询", func(t *testing.T) {
+		q2 := newChanQueue()
+		successes := make(chan string, 2)
+		e2, err := New(Config[string, *BorrowOpContext]{
+			Queue:   q2,
+			Workers: 2,
+			MsgKeyFunc: func(msg string) string {
+				if msg == "P1" {
+					panic("key extraction crash")
+				}
+				return msg
+			},
+			Resolve: func(msg string) ([]Step[*BorrowOpContext], *BorrowOpContext, error) {
+				return []Step[*BorrowOpContext]{noOpStep{}}, &BorrowOpContext{OpNo: msg}, nil
+			},
+			OnSuccess: func(msg string, ctx *BorrowOpContext) { successes <- msg },
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		if err := e2.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		q2.msgs <- "P1"
+		q2.msgs <- "K1"
+		got := map[string]bool{}
+		for i := 0; i < 2; i++ {
+			select {
+			case m := <-successes:
+				got[m] = true
+			case <-time.After(3 * time.Second):
+				t.Fatal("MsgKeyFunc panic 后消息未正常处理")
+			}
+		}
+		e2.Stop()
+		if !got["P1"] || !got["K1"] {
+			t.Fatalf("两条消息均应成功, got %v", got)
+		}
+	})
 }
 
 // ---- 测试步骤 ----

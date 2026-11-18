@@ -197,12 +197,31 @@ func (e *Engine[M, C]) awaitResume() bool {
 }
 
 // interrupt 停机中断上报（不终态、不重投）：统一 handle 在途步骤与分片模式已路由/
-// 尚未交付的消息两条路径，均走 OnInterrupted 观测链路。
+// 尚未交付的消息两条路径，均走 OnInterrupted 观测链路。OnInterrupted 自身 panic 由
+// recover 兜住（与 safeFatal 对称），观测钩子异常不得击穿停机中的 worker/dispatcher。
 func (e *Engine[M, C]) interrupt(msg M, err error) {
 	e.cfg.Log.Warnf("停机中断在途消息(不终态化/不重投): err=%v", err)
-	if e.cfg.OnInterrupted != nil {
-		e.cfg.OnInterrupted(msg, err)
+	if e.cfg.OnInterrupted == nil {
+		return
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			e.cfg.Log.Errorf("OnInterrupted 回调 panic 已恢复: panic=%v\n%s", r, debug.Stack())
+		}
+	}()
+	e.cfg.OnInterrupted(msg, err)
+}
+
+// safeKey 提取有序键：MsgKeyFunc 实现内 panic 被 recover 并降级为空键（轮询分发），
+// 单条坏消息的键提取不得击穿 dispatcher 接收循环。
+func (e *Engine[M, C]) safeKey(msg M) (key string) {
+	defer func() {
+		if r := recover(); r != nil {
+			key = ""
+			e.cfg.Log.Errorf("MsgKeyFunc panic 已恢复, 该消息降级轮询分发: panic=%v\n%s", r, debug.Stack())
+		}
+	}()
+	return e.cfg.MsgKeyFunc(msg)
 }
 
 // hashKey 将有序键稳定哈希为分片索引（fnv-1a）。
@@ -248,7 +267,7 @@ dispatchLoop:
 			continue
 		}
 		idx := rr % e.cfg.Workers // 空键：无有序要求，轮询分摊
-		if key := e.cfg.MsgKeyFunc(msg); key != "" {
+		if key := e.safeKey(msg); key != "" {
 			idx = int(hashKey(key) % uint64(e.cfg.Workers))
 		}
 		rr++

@@ -26,12 +26,13 @@ type Config[M any, C Context] struct {
 	// OnSuccess 全部步骤执行成功后调用。
 	OnSuccess func(msg M, ctx C)
 
-	// OnRetried 失败且退避重投入队成功后调用（msg 为本轮消息、next 为重投消息），
+	// OnRetried 失败且 Retryer 裁决重投、入队成功后调用（msg 为本轮消息、next 为重投消息），
 	// 如：重试计数 +1。重投入队失败时不调用，消息留在途由外部兜底（如补偿任务）。
 	OnRetried func(msg M, next M, delay time.Duration)
 
-	// OnExhausted 失败且重试裁决不重试后调用（Retryer 为 nil 时首次失败即触发），
-	// 如：终态回写 + 落死信。退避饱和封顶（等待时长已无实际意义）同样按耗尽处理，
+	// OnExhausted 失败且重试裁决不重试后调用（Retryer 为 nil 时首次失败即触发；
+	// ErrNonRetryable 短路与退避饱和封顶同样命中），
+	// 如：终态回写 + 落死信。退避饱和封顶（等待时长已无实际意义）按耗尽处理，
 	// 避免消息陷入「永不入队也永不死信」的僵尸态。
 	OnExhausted func(msg M, failedStep string, err error)
 

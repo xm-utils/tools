@@ -103,16 +103,18 @@ import (
 )
 
 func main() {
-    // 创建配置（单库单节点场景，直接填写 Host/Port/User/Password/Name）
+    // 创建配置（必填 user/host/port/database，Password 允许为空）
+    // 连接字段已从顶层下沉到 db_master 节点（Master *MysqlNodeConfig）
     config := &database.MysqlConfig{
-        Alias:    "default",
-        Name:     "mydb",
-        User:     "root",
-        Password: "password",
-        Host:     "127.0.0.1",
-        Port:     "3306",
-        Debug:    "true",
-        
+        Master: &database.MysqlNodeConfig{
+            Host:     "127.0.0.1",
+            Port:     "3306",
+            User:     "root",
+            Password: "password",
+            Database: "mydb",
+        },
+        Debug: "true",
+
         // 连接池配置
         MaxIdleConns:    10,
         MaxOpenConns:    100,
@@ -120,8 +122,8 @@ func main() {
         ConnMaxIdleTime: 600,
 
         // 一主多从（可选）：见「一主多从读写分离（DBResolver）」章节
-        // 主库即上方 Host/Port/User/Password/Name，以下为多个从库
-        // Slaves: []database.MysqlNodeConfig{{Host: "10.0.1.1", Port: "3306"}},
+        // Slaves 为多个读库，每个节点同样需提供完整连接信息
+        // Slaves: []database.MysqlNodeConfig{{Host: "10.0.1.1", Port: "3306", User: "root", Password: "password", Database: "mydb"}},
     }
 
     // 初始化数据库：内部基于 sync.Once，进程内只会真正初始化一次，重复调用安全
@@ -137,25 +139,26 @@ func main() {
 }
 ```
 
-> **必填校验**：`InitGorm`/`openDB` 在建立连接前先校验 `User/Host/Port/Name` 非空（`Password` 允许为空）；若配置了 `Slaves`，逐节点校验其 `Host/Port`。缺失项会一次性列于返回的 error 中（含 `slaves[i]` 定位），避免生成畸形 DSN 后才在连库阶段暴露晦涩错误。
+> **必填校验**：`InitGorm` 首先检查 `config` 及 `config.Master` 非 nil，再校验主库节点 `User/Host/Port/Database` 非空（`Password` 允许为空）。缺失项会一次性列于返回的 error 中，避免生成畸形 DSN 后才连库失败。
 
 ### YAML 配置加载
 
-> 完整字段说明与多场景模板见同目录的 [config.example.yaml](config.example.yaml)（含逐行注释、从库继承说明与 viper 加载代码）。
+> 完整字段说明与多场景模板见同目录的 [config.example.yaml](config.example.yaml)（含逐行注释、从库节点写法与 viper 加载代码）。
 
-1. 创建配置文件 `database.yaml`：
+1. 创建配置文件 `database.yaml`（连接字段已下沉到 `db_master`，顶层不再有 `db_name/db_user/db_pwd/db_host/db_port/db_charset/db_location/db_alias/db_log_dir`）：
 
 ```yaml
-db_alias: "default"
-db_name: "mydb"
-db_user: "root"
-db_pwd: "password"
-db_host: "127.0.0.1"
-db_port: "3306"
+db_master:                    # 主库(写库)，必填
+  host: "127.0.0.1"
+  port: "3306"
+  user: "root"
+  pwd: "password"
+  database: "mydb"
+  charset: "utf8mb4"          # 留空默认 utf8mb4
+  location: "Asia/Shanghai"  # 留空默认 Local
+
 db_debug: "true"
 db_table_prefix: "app_"
-db_charset: "utf8mb4"
-db_location: "Asia/Shanghai"
 
 # 连接池配置
 db_max_idle_conns: 10
@@ -163,11 +166,10 @@ db_max_open_conns: 100
 db_conn_max_lifetime: 3600
 db_conn_max_idle_time: 600
 
-# 一主多从读写分离（可选）：主库即上方 db_host/db_port 及 db_user/db_pwd/db_name；以下为多个从库
-# 从库的 user/pwd/database/charset/location 省略即继承主库
+# 一主多从读写分离（可选）：每个从库需填写完整连接信息
 db_slaves:
-  - { host: "10.0.1.1", port: "3306" }
-  - { host: "10.0.1.2", port: "3306" }
+  - { host: "10.0.1.1", port: "3306", user: "root", pwd: "password", database: "mydb" }
+  - { host: "10.0.1.2", port: "3306", user: "root", pwd: "password", database: "mydb" }
 ```
 
 2. 在代码中加载配置（需配合配置加载库如 viper）：
@@ -614,27 +616,29 @@ func (User) TableName() string {
 #### 核心行为
 
 - **单例初始化**：`InitGorm(config)` 由 `sync.Once` 保证进程内仅初始化一次；重复调用直接返回首次的初始化结果（含错误），可安全放在任意启动位置。
-- **一主多从**：主库使用配置顶层的 `Host/Port/User/Password/Name`（作为唯一写库 Sources）；`Slaves` 配置多个从库（Replicas）。写操作走主库，读操作在多个从库间由 `RandomPolicy` 随机负载均衡。
-- **凭证继承**：从库节点的 `User/Password/Database/Charset/Location` 留空时自动继承主库，通常只需填写各从库的 `Host/Port`。
+- **一主多从**：主库使用 `config.Master`（`*MysqlNodeConfig`，作为唯一写库 Sources）；`Slaves` 配置多个从库（Replicas）。写操作走主库，读操作在多个从库间由 `RandomPolicy` 随机负载均衡。
+- **节点自带连接信息**：主库与每个从库都是同一种节点配置，各自提供完整 `Host/Port/User/Password/Database`（当前实现不再自动继承主库凭证，从库需自行填写）；`Charset/Location` 留空时使用默认值 utf8mb4 / Local。
 - **向后兼容**：若不配置 `Slaves`，则仅使用主库单连接，行为与旧版一致。
 - **连接池**：`MaxIdleConns` 等参数会同时下发到主连接与 DBResolver 内每个从库连接池。
 
 #### 配置结构
 
 ```go
-// 从库节点配置（User/Password/Database/Charset/Location 为空时继承主库）
+// 节点配置（主库 Master 与从库 Slaves 元素共用同一结构）
+// Host/Port/User/Password/Database 均需自行填写；Charset/Location 留空使用默认值
 type MysqlNodeConfig struct {
     Host     string // 数据库 IP（域名）
     Port     string // 端口
-    User     string // 用户名，为空继承主库
-    Password string // 密码，为空继承主库
-    Database string // 库名，为空继承主库
-    Charset  string // 字符集，为空继承主库
-    Location string // 时区，为空继承主库
+    User     string // 用户名
+    Password string // 密码
+    Database string // 库名
+    Charset  string // 字符集，留空默认 utf8mb4
+    Location string // 时区，留空默认 Local
 }
 
-// MysqlConfig 新增字段
-//   Slaves []MysqlNodeConfig // 读节点（从）列表
+// MysqlConfig 关键字段
+//   Master *MysqlNodeConfig   // 主库（写库），yaml: db_master
+//   Slaves []MysqlNodeConfig  // 读节点（从）列表，yaml: db_slaves
 ```
 
 #### 代码配置示例
@@ -642,16 +646,18 @@ type MysqlNodeConfig struct {
 ```go
 config := &database.MysqlConfig{
     // 主库（唯一写库）
-    Name:     "mydb",
-    User:     "root",
-    Password: "password",
-    Host:     "10.0.0.1",
-    Port:     "3306",
+    Master: &database.MysqlNodeConfig{
+        Host:     "10.0.0.1",
+        Port:     "3306",
+        User:     "root",
+        Password: "password",
+        Database: "mydb",
+    },
 
-    // 多从（读库）：user/pwd/database 省略即继承主库
+    // 多从（读库）：每个节点需自行填写完整连接信息
     Slaves: []database.MysqlNodeConfig{
-        {Host: "10.0.1.1", Port: "3306"},
-        {Host: "10.0.1.2", Port: "3306"},
+        {Host: "10.0.1.1", Port: "3306", User: "root", Password: "password", Database: "mydb"},
+        {Host: "10.0.1.2", Port: "3306", User: "root", Password: "password", Database: "mydb"},
     },
 
     MaxIdleConns:    10,

@@ -28,13 +28,16 @@ type User struct {
 }
 
 func main() {
+    // 连接字段集中在 db_master 节点（Master *MysqlNodeConfig），必填 user/host/port/database
     config := &database.MysqlConfig{
-        Name:     "mydb",
-        User:     "root",
-        Password: "password",
-        Host:     "127.0.0.1",
-        Port:     "3306",
-        Debug:    "true", // 调试日志，"true" 开启
+        Master: &database.MysqlNodeConfig{
+            Host:     "127.0.0.1",
+            Port:     "3306",
+            User:     "root",
+            Password: "password",
+            Database: "mydb",
+        },
+        Debug: "true", // 调试日志，"true" 开启
 
         // 连接池（可选，留空使用默认值 10/100/3600s/600s）
         MaxIdleConns:    10,
@@ -52,7 +55,7 @@ func main() {
 }
 ```
 
-> **必填校验**：`User/Host/Port/Name` 缺失会直接返回明确 error（`Password` 允许为空），不会等到连库阶段才报晦涩错误。
+> **必填校验**：`InitGorm` 先检查 `config` 与 `config.Master` 非 nil，再校验主库节点 `User/Host/Port/Database` 非空（`Password` 允许为空），缺失会直接返回明确 error。
 >
 > 📄 需要用 YAML + viper 加载配置时，参照同目录的 [config.example.yaml](config.example.yaml)（含逐行注释与多场景模板）。
 
@@ -177,12 +180,15 @@ err = database.Ctx[User](ctx).Where(database.Eq("status", 0)).DeleteByCondition(
 
 ## 🗄️ 6. 一主多从读写分离
 
-主库用顶层 `Host/Port/User/Password/Name`，`Slaves` 配置多个从库（凭证留空自动继承主库）。**默认全部读写走主库**；只有实现 `ReplicaReader` 并注册的模型，其表读操作才走从库：
+主库用 `config.Master`（节点配置），`Slaves` 配置多个从库（同一种节点结构）。**默认全部读写走主库**；只有实现 `ReplicaReader` 并注册的模型，其表读操作才走从库。
+
+> ❗ 当前实现不再自动继承主库凭证：主库与每个从库都需各自填写完整 `Host/Port/User/Password/Database`（`Charset/Location` 留空则用默认 utf8mb4/Local）。
 
 ```go
+config.Master = &database.MysqlNodeConfig{Host: "10.0.0.1", Port: "3306", User: "root", Password: "password", Database: "mydb"}
 config.Slaves = []database.MysqlNodeConfig{
-    {Host: "10.0.1.1", Port: "3306"},
-    {Host: "10.0.1.2", Port: "3306"},
+    {Host: "10.0.1.1", Port: "3306", User: "root", Password: "password", Database: "mydb"},
+    {Host: "10.0.1.2", Port: "3306", User: "root", Password: "password", Database: "mydb"},
 }
 
 // 模型声明读走从库

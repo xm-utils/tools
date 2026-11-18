@@ -83,7 +83,7 @@ func collectReplicaTables(instance *gorm.DB) []interface{} {
 // 返回 true 的模型，其对应表 SELECT 走从库，其余表读写都走主库（默认全走主库）。
 // 模型需先通过 RegisterModels 注册才会被扫描；表名无需写入配置文件。
 func InitGorm(config *MysqlConfig) error {
-	if config == nil {
+	if config == nil || config.Master == nil {
 		return errors.New("init gorm database fail. can not find database config")
 	}
 
@@ -99,7 +99,7 @@ func InitGorm(config *MysqlConfig) error {
 //   - 统一设置连接池参数与表名前缀。
 func openDB(config *MysqlConfig) (*gorm.DB, error) {
 	// 先校验必填连接字段，缺失时返回清晰 error，避免生成畸形 DSN 后才在连库阶段暴露晦涩错误
-	if err := config.validate(); err != nil {
+	if err := config.Master.validate(); err != nil {
 		return nil, err
 	}
 
@@ -110,10 +110,9 @@ func openDB(config *MysqlConfig) (*gorm.DB, error) {
 	}
 
 	// 主库(写库)作为初始连接，避免明文打印 DSN 中的密码
-	logrus.Debugf("GORM数据库连接配置 - Host: %s, Port: %s, DB: %s, 从库数: %d\n",
-		config.Host, config.Port, config.Name, len(config.Slaves))
+	logrus.Debugf("GORM数据库连接配置 - Host: %s, Port: %s, DB: %s \n", config.Master.Host, config.Master.Port, config.Master.Database)
 
-	instance, err := gorm.Open(mysql.Open(config.Url()), &gorm.Config{
+	instance, err := gorm.Open(mysql.Open(config.Master.Url()), &gorm.Config{
 		Logger: logger.New(logrus.WithField("module", "GORM"), logger.Config{
 			SlowThreshold:             200 * time.Millisecond,
 			LogLevel:                  logLevel,
@@ -164,7 +163,7 @@ func buildResolver(instance *gorm.DB, config *MysqlConfig) gorm.Plugin {
 
 	// 仅这些表读走从库；其余表未命中 resolver，读写都回落到主库(gorm.Open 连接)
 	resolver := dbresolver.Register(dbresolver.Config{
-		Replicas: toDialectors(config.Slaves, config),
+		Replicas: toDialectors(config.Slaves),
 		Policy:   dbresolver.RandomPolicy{},
 	}, datas...)
 
@@ -181,10 +180,10 @@ func buildResolver(instance *gorm.DB, config *MysqlConfig) gorm.Plugin {
 }
 
 // toDialectors 将节点列表转换为 GORM Dialector 列表。
-func toDialectors(nodes []MysqlNodeConfig, config *MysqlConfig) []gorm.Dialector {
+func toDialectors(nodes []MysqlNodeConfig) []gorm.Dialector {
 	dialectors := make([]gorm.Dialector, 0, len(nodes))
 	for i := range nodes {
-		dialectors = append(dialectors, mysql.Open(nodes[i].Url(config)))
+		dialectors = append(dialectors, mysql.Open(nodes[i].Url()))
 	}
 	return dialectors
 }

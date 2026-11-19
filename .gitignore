@@ -1,3 +1,6 @@
 # Go 本地工作区文件（仅本地多模块联调使用，不提交）
 go.work
 go.work.sum
+
+# 本地架构规划文档，不提交
+ARCHITECTURE_ROADMAP.md

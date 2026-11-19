@@ -84,7 +84,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-// consul 模块尚未发布 tag，模块图加载会因拉取不到 v1.0.0 而失败，本地开发先指向仓内目录；发布 consul/v1.0.0 后移除
-replace github.com/xm-utils/tools/consul => ../consul
-
 replace google.golang.org/genproto => google.golang.org/genproto v0.0.0-20241118233622-e639e219e697

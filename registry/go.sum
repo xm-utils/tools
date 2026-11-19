@@ -909,6 +909,8 @@ github.com/tjfoc/gmsm v1.3.2/go.mod h1:HaUcFuY0auTiaHB9MHFGCPx5IaLhTUd2atbCFBQXn
 github.com/tjfoc/gmsm v1.4.1 h1:aMe1GlZb+0bLjn+cKTPEvvn9oUEBlJitaZiiBwsbgho=
 github.com/tjfoc/gmsm v1.4.1/go.mod h1:j4INPkHWMrhJb38G+J6W4Tw0AbuN8Thu3PbdVYhVcTE=
 github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926/go.mod h1:9ESjWnEqriFuLhtthL60Sar/7RFoluCcXsuvEwTV5KM=
+github.com/xm-utils/tools/consul v1.0.0 h1:cuXBfluFkp/fuzaJ9WAJqqFIulu/7ccDejKzO/KzuXY=
+github.com/xm-utils/tools/consul v1.0.0/go.mod h1:MwgV+GV9lqfILgJxqMYFZbK/rGKKT4aOiwnG0qSyim8=
 github.com/xm-utils/tools/nacos v1.0.0 h1:N8qhAJ87mg3jWbjCEeienrsFeJhappJtN/Dy8rWqjko=
 github.com/xm-utils/tools/nacos v1.0.0/go.mod h1:qfs7hnajwecu0Ag0xzb+l4DDs45XXF3kEVnvDgW0XJg=
 github.com/yuin/goldmark v1.1.25/go.mod h1:3hX8gzYuyVAZsxl0MRgGTJEmQBFcNTphYh9decYSb74=

@@ -17,6 +17,7 @@ Go 微服务基础设施工具集，提供数据库访问、缓存、消息队�
 | `redis` | Redis 客户端封装：String / Hash / List / Set / SortedSet / Stream 全数据结构操作 | [README](redis/README.md) |
 | `redis_stream_queue` | 基于 Redis Stream 的可靠消息队列：消费者组、装饰器（重试 / 幂等 / 死信）、Pending 巡检 | [README](redis_stream_queue/README.md) |
 | `kafka` | Kafka 客户端：生产者 / 消费者、Worker Pool、消息去重（内存 / Redis）、指标监控 | [README](kafka/README.md) |
+| `mq` | 消息队列统一门面：Producer / Consumer 抽象，Kafka 与 Redis 四种形态（Stream / List / ZSet 延迟 / 发布订阅）适配器，pipeline 桥接 | [README](mq/README.md) · [QUICKSTART](mq/QUICKSTART.md) |
 | `mongodb` | MongoDB 客户端：连接管理、泛型 CRUD、聚合管道 | [README](mongodb/README.md) · [QUICKSTART](mongodb/QUICKSTART.md) |
 | `pipeline` | 泛型消息消费执行引擎：步骤链编排、错误分级、步骤超时、有界停机、同 Key 串行 | [README](pipeline/README.md) · [QUICKSTART](pipeline/QUICKSTART.md) |
 | `retry` | 非阻塞重试执行器：多策略（固定 / 指数 / 线性）、批量并发、监控回调 | [README](retry/README.md) · [QUICKSTART](retry/QUICKSTART.md) |
@@ -60,6 +61,7 @@ tools/
 ├── httpclient/           # HTTP 客户端
 ├── kafka/                # Kafka 消息队列
 ├── mongodb/              # MongoDB 客户端
+├── mq/                   # 消息队列统一门面（kafka / redis 适配器 / pipequeue 桥接）
 ├── nacos/                # Nacos 配置/注册中心
 ├── pipeline/             # 消息消费执行引擎
 ├── redis/                # Redis 客户端

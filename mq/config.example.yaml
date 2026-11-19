@@ -1,0 +1,95 @@
+# mq 门面配置模板
+#
+# 适配器直接复用底层组件配置结构体（kafka.NewConsumer 收 tools/kafka.ConsumerConfig、
+# redis/stream.NewProducer 收 tools/redis_stream_queue.RedisConfig），本文件字段与各
+# 结构体 yaml tag 一一对应；redis/list、redis/zset、redis/pubsub 段对应代码内
+# Options 结构体字段，pipequeue 段为桥接层装配项（代码内 Config 字段）。
+# 门面层没有统一的 YAML 加载入口，业务可用 viper/yaml 反序列化后映射到以下结构体。
+
+# ---------- Kafka 后端 ----------
+kafka:
+  producer:
+    brokers: ["localhost:9092"]
+    client_id: order-service
+    max_attempts: 3
+    batch_size: 1000
+    batch_bytes: 10485760        # 10MB
+    read_timeout: 10s
+    write_timeout: 10s
+    dial_timeout: 10s
+    allow_auto_topic_creation: false
+  consumer:
+    brokers: ["localhost:9092"]
+    client_id: order-service
+    group_id: order-service      # 可被 Subscribe(ctx, group, ...) 参数覆盖
+    topic: orders                # 订阅时以 Subscribe 的 topic 参数为准
+    # GroupID/Topic/Topics/AutoCommit 由门面强制改写（手动提交模式），此处配置仅作占位
+    min_bytes: 1
+    max_bytes: 10485760
+    max_wait: 1s
+    heartbeat_interval: 3s
+    session_timeout: 30s
+    rebalance_timeout: 30s
+    start_offset: -2             # -2=FirstOffset, -1=LastOffset
+    auto_commit: false           # 门面语义固定手动提交，此处须保持 false
+    queue_capacity: 1000
+  # mq/kafka.Consumer 装配项（代码内 Option，非 yaml 结构体字段）
+  consumer_options:
+    max_requeue: 3               # WithMaxRequeue：失败重投额度，0 关闭重投
+    # requeue_producer / rejected 钩子 / logger 为代码注入，无 yaml 形态
+
+# ---------- Redis Stream 后端 ----------
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 10
+  min_idle_conns: 5
+  max_retries: 3
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+
+redis_stream_options:
+  max_requeue: 3                 # WithMaxRequeue
+  dead_letter_key: ""            # WithDeadLetterKey：终态消息转入的死信 Stream（空=不转）
+  consumer_name: ""              # WithConsumerName：空则自动生成 hostname-pid-序号
+
+# ---------- Redis List 安全队列（mq/redis/list.Options 字段示意） ----------
+redis_list_options:
+  key_prefix: "mq:list:"         # ready/processing 列表 key 前缀
+  consumer_name: ""              # 投递 ID 前缀，空则生成 redis-list-<hostname>-<pid>
+  max_requeue: 3                 # 失败重投额度；0 取默认 3，负数关闭
+  dead_letter_key: ""            # 终态死信 List key（空=不转）
+  poll_interval: 100ms           # 队列空时轮询间隔
+  recover_processing: false      # 订阅启动时 processing 残留回补 ready（单活动消费者假设）
+
+# ---------- Redis 有序集合延迟队列（mq/redis/zset.Options 字段示意） ----------
+redis_zset_options:
+  key_prefix: "mq:zset:"         # ready/processing 集合 key 前缀
+  consumer_name: ""              # 投递 ID 前缀，空则生成 redis-zset-<hostname>-<pid>
+  max_requeue: 3
+  dead_letter_key: ""            # 终态死信集合 key（score=失败时刻）
+  poll_interval: 100ms
+  visibility_timeout: 0s         # >0 启用：processing 超时未确认自动回收重投
+  reclaim_batch: 50              # 单轮回收条数上限
+  # 延迟投递经消息头指定：X-Mq-Delay（相对毫秒）/ X-Mq-Ready-At（unix 毫秒）
+
+# ---------- Redis 发布/订阅广播（mq/redis/pubsub.Options 字段示意） ----------
+# 无持久化与确认语义：Commit/Reject 为 no-op，失败不可重投，离线订阅者丢消息
+redis_pubsub_options:
+  channel_prefix: "mq:ps:"       # 频道名前缀
+  consumer_name: ""              # 订阅者标识（日志与投递 ID 前缀），空则生成 redis-pubsub-<hostname>-<pid>
+  pattern: false                 # true 时 topic 作 glob 模式（PSUBSCRIBE）
+  channel_buffer: 100            # 订阅侧缓冲条数；满时接收协程阻塞至多 1 分钟后丢弃该条新消息
+  health_check_interval: 3s      # 连接探活/重连间隔；0 取默认 3s，负数关闭（不建议）
+  # rejected 钩子为代码注入，无 yaml 形态
+
+# ---------- pipeline 桥接（mq/pipequeue.Config 字段示意） ----------
+pipequeue:
+  group: order-service
+  topic: orders
+  buffer_size: 100               # 领取缓冲深度，满即背压
+  manual_ack: true               # 严格 at-least-once：确认挂到引擎终态钩子
+  durable_retry: false           # true 时 Submit 经 Producer 回投 MQ 本体
+  produce_timeout: 5s

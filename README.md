@@ -24,6 +24,7 @@ Go 微服务基础设施工具集，提供数据库访问、缓存、消息队�
 | `deadletter` | 死信队列：自定义持久化（GORM）、自动恢复重试、实时监控告警 | [README](deadletter/README.md) · [QUICKSTART](deadletter/QUICKSTART.md) |
 | `consul` | Consul SDK 封装：服务注册 / 发现、健康检查、KV 配置 | [README](consul/README.md) |
 | `nacos` | Nacos SDK 封装：配置管理、服务发现（闭包模式独立客户端） | [README](nacos/README.md) |
+| `registry` | 注册中心/配置中心统一抽象：consul / nacos 双适配器，服务注册发现、实例 Watch、配置热更新 | [README](registry/README.md) · [QUICKSTART](registry/QUICKSTART.md) |
 | `grpcx` | gRPC 服务工具：Server / Client 快速构建、cmux 端口复用（gRPC + HTTP）、优雅停机 | — |
 | `httpclient` | HTTP 客户端：连接池、JSON / 表单 / 文件上传、请求追踪 | — |
 | `common` | 通用工具函数：JWT、字符串 / 切片 / 时间 / 网络、RSA 加解密、密码哈希、统一响应体 | — |
@@ -63,8 +64,8 @@ tools/
 ├── pipeline/             # 消息消费执行引擎
 ├── redis/                # Redis 客户端
 ├── redis_stream_queue/   # Redis Stream 可靠队列
-├── retry/                # 重试执行器
-└── go.mod                # 仓库根模块（仅声明，无业务代码）
+├── registry/             # 注册中心/配置中心统一抽象（consul/nacos 双适配器）
+└── retry/                # 重试执行器
 ```
 
 ## 设计约定

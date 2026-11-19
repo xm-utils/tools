@@ -1,0 +1,39 @@
+# registry 组件配置模板
+# 业务侧装配示例：通过 backend 字段选择注册中心，两个后端的原生配置段
+# 分别对应 github.com/xm-utils/tools/consul.Config 与
+# github.com/xm-utils/tools/nacos.Config 的字段（yaml tag 一一对应）。
+
+# 注册中心后端选择: consul | nacos
+backend: consul
+
+# ---------- Consul 后端（registry/consul.New / NewConfigAdapter 入参） ----------
+consul:
+  address: 127.0.0.1:8500      # Consul Agent 地址
+  scheme: http                 # 协议 scheme，默认 http
+  datacenter: ""               # 数据中心，跨 DC 查询时指定
+  token: ""                    # ACL Token（启用 ACL 时必填）
+  timeout: 10                  # 阻塞查询超时（秒）
+
+# ---------- Nacos 后端（registry/nacos.New / NewConfigAdapter 入参） ----------
+nacos:
+  enabled: true                # 必须为 true，否则客户端创建报错
+  serverConfig:                # Nacos 服务端地址列表
+    - ipAddr: 127.0.0.1
+      port: 8848
+      scheme: http             # 2.0 版本可不填
+      grpcPort: 0              # 0 表示默认 port+1000
+      contextPath: /nacos      # 2.0 版本可不填
+  clientConfig:
+    namespaceId: ""            # 命名空间 ID，public 命名空间填空字符串
+    groupName: DEFAULT_GROUP   # 分组，同时用于配置中心 dataId 的 Group
+    clusterName: DEFAULT       # 集群名
+    timeoutMs: 10000           # 请求超时（毫秒）
+    beatInterval: 5000         # 心跳间隔（毫秒）
+    username: ""               # 鉴权用户名（开启鉴权时必填）
+    password: ""               # 鉴权密码
+
+# ---------- Watch 默认参数（registry.WatchConfig） ----------
+watch:
+  interval: 10s                # 服务实例轮询间隔
+  healthyOnly: true            # 仅推送健康实例
+  tags: []                     # 标签过滤（空 = 不过滤）

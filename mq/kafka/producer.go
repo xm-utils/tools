@@ -15,12 +15,11 @@ import (
 	xmkafka "github.com/xm-utils/tools/kafka"
 
 	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
 )
 
-// HeaderAttempt 重投次数消息头（共享信封单点定义，各后端适配器同名）；
+// HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）；
 // Consumer 失败重投与 Reject(requeue=true) 均自增该值。
-const HeaderAttempt = envpkg.HeaderAttempt
+const HeaderAttempt = mq.HeaderAttempt
 
 // Producer Kafka 生产者适配器，实现 mq.Producer。
 type Producer struct {

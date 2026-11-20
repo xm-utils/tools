@@ -14,8 +14,9 @@ import (
 	"github.com/xm-utils/tools/mq"
 )
 
-// HeaderAttempt 重投次数消息头（所有后端适配器同名，信封内计数与消息头双向同步）。
-const HeaderAttempt = "X-Mq-Attempt"
+// HeaderAttempt 重投次数消息头（单点取自门面 mq.HeaderAttempt）；
+// 信封内计数与消息头双向同步。
+const HeaderAttempt = mq.HeaderAttempt
 
 // Envelope 消息信封。ID 为消息持久标识（可为空，由后端适配器按能力补全）。
 type Envelope struct {

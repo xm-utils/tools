@@ -90,7 +90,7 @@ type Consumer interface {
 | `redis/pubsub.NewProducer(*redis.Client, *Options)` | 发布适配器（PUBLISH，自动生成消息 ID 并回填 `msg.ID`） |
 | `redis/pubsub.NewConsumer(*redis.Client, *Options)` | 订阅适配器；Options：`ChannelPrefix` / `Pattern`（PSUBSCRIBE 通配）/ `ChannelBuffer` / `Rejected` / `HealthCheckInterval` |
 
-重投次数消息头：`X-Mq-Attempt`（各适配器同名，单点取自 `mq/internal/envelope`；Redis 后端与共享信封内计数双向同步）。Redis 系适配器均直接接收 `*redis.Client`，不依赖 `tools/redis` 组件的全局连接与 key 前缀约定；key/频道前缀由 `Options.KeyPrefix` / `Options.ChannelPrefix` 控制（默认 `mq:list:` / `mq:zset:` / `mq:ps:`）。
+重投次数消息头：`X-Mq-Attempt`（单点定义于门面 `mq.HeaderAttempt`，各适配器导出同值常量；Redis 后端与共享信封内计数双向同步）。Redis 系适配器均直接接收 `*redis.Client`，不依赖 `tools/redis` 组件的全局连接与 key 前缀约定；key/频道前缀由 `Options.KeyPrefix` / `Options.ChannelPrefix` 控制（默认 `mq:list:` / `mq:zset:` / `mq:ps:`）。
 
 `msg.ID` 为适配器签发的**不透明投递令牌**（kafka / redis-stream 形如 `group|…`，redis-list / redis-zset / redis-pubsub 为领取者+序号形式），仅用于日志追踪与原样回传 `Commit`/`Reject`；业务不要解析其结构或据此做幂等（幂等请用 `Key` / `Headers`）。
 

@@ -17,6 +17,10 @@ import (
 	"fmt"
 )
 
+// HeaderAttempt 重投次数消息头：全后端同名，单点由本包定义（各适配器导出同值常量
+// 供习惯引用）。适配器失败重投时负责自增；业务可读该头观测投递轮次，不应自行写入。
+const HeaderAttempt = "X-Mq-Attempt"
+
 // Message 统一消息模型。业务只依赖本结构，底层原始消息保留在 Metadata 中
 // （如 Kafka 侧为 kafka.Message，Redis Stream 侧为 redis_stream.StreamMessage），
 // 供高级场景取用分区、offset、idle 时间等专有字段。

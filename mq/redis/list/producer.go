@@ -23,8 +23,8 @@ import (
 	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
 )
 
-// HeaderAttempt 重投次数消息头（共享信封单点定义，各后端适配器同名）。
-const HeaderAttempt = envpkg.HeaderAttempt
+// HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。
+const HeaderAttempt = mq.HeaderAttempt
 
 const (
 	defaultKeyPrefix = "mq:list:"

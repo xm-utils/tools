@@ -25,8 +25,8 @@ import (
 )
 
 const (
-	// HeaderAttempt 重投次数消息头（共享信封单点定义，各后端适配器同名）。
-	HeaderAttempt = envpkg.HeaderAttempt
+	// HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。
+	HeaderAttempt = mq.HeaderAttempt
 	// HeaderDelay 相对延迟消息头，值为毫秒数；与 X-Mq-Ready-At 同存时后者优先。
 	HeaderDelay = "X-Mq-Delay"
 	// HeaderReadyAt 绝对可见时间消息头，值为 unix 毫秒；解析失败按立即投递。

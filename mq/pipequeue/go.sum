@@ -2,6 +2,8 @@ github.com/sirupsen/logrus v1.10.2 h1:G2SED73/qrAu6YwbdxOD6peLkCBI3z7L+ykJFTXJBB
 github.com/sirupsen/logrus v1.10.2/go.mod h1:SLEg8TqYulVKKfIGHldVp2K2aYz2DKSVBq4g/H5bR7Q=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=
 github.com/stretchr/testify v1.12.1/go.mod h1:MDEgiDPPsNp5cuIrHPPCyornHKgEVbtFUmoNlxoYthg=
+github.com/xm-utils/tools/mq/core v0.0.0-20261120075555-916e5352375e h1:hm2xeF6S1rmuPjhJCLSs4qiiH6S81/7m33l90VbW/aM=
+github.com/xm-utils/tools/mq/core v0.0.0-20261120075555-916e5352375e/go.mod h1:hNn3ARb+CXqUbxHmltNMnvFLewkKA2wab2jhW23vH4s=
 github.com/xm-utils/tools/pipeline v0.0.1 h1:3GAGqWFDtPKHML4YtsJN0pt5HaKNDLHWp4Vw3sHQEVw=
 github.com/xm-utils/tools/pipeline v0.0.1/go.mod h1:F+nA1PRVdalqsqKBJZaJ0xncDf4kwmzF75ZQzfwur5o=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=

@@ -38,6 +38,8 @@ github.com/xm-utils/tools/database v1.1.0 h1:JbjmjxwvoncD6Qk/YL4VLEEM4LlC2VPwT4T
 github.com/xm-utils/tools/database v1.1.0/go.mod h1:ufLgOEv87DWhbBCJUwsZHwEwbv3XO4rVUmFfva+ph1o=
 github.com/xm-utils/tools/deadletter v1.0.2 h1:4PkV0azx3QtCo5BVCDP1xS/MPRVToBFscncTV+yy72Y=
 github.com/xm-utils/tools/deadletter v1.0.2/go.mod h1:rbAyJ7y7F7lcr8hYTka2lYwAFllQdsXWVPkNp7UIcuc=
+github.com/xm-utils/tools/mq/core v0.0.0-20261120075555-916e5352375e h1:hm2xeF6S1rmuPjhJCLSs4qiiH6S81/7m33l90VbW/aM=
+github.com/xm-utils/tools/mq/core v0.0.0-20261120075555-916e5352375e/go.mod h1:hNn3ARb+CXqUbxHmltNMnvFLewkKA2wab2jhW23vH4s=
 github.com/xm-utils/tools/redis v1.0.0 h1:tK/cqXEdIPT3GadyGbjoiViJfCyQzCd+mKFsNvGDKnk=
 github.com/xm-utils/tools/redis v1.0.0/go.mod h1:Z60nk2ZITTCm9UUoaYeTEGvQZwato2XsoArq54BZH9g=
 github.com/xm-utils/tools/retry v1.0.2 h1:7KMRaqp2IHgEgQAAnze9vIEur/LWOhdna6TBX4DeOd8=
@@ -46,6 +48,8 @@ github.com/yuin/gopher-lua v1.1.1 h1:kYKnWBjvbNP4XLT3+bPEwAXJx262OhaHDWDVOPjL46M
 github.com/yuin/gopher-lua v1.1.1/go.mod h1:GBR0iDaNXjAgGg9zfCvksxSRnQx76gclCIb7kdAd1Pw=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
+golang.org/x/net v0.0.0-20210428140749-89ef3d95e781 h1:DzZ89McO9/gWPsQXS/FVKAlG02ZjaQ6AlZRBimEYOd0=
+golang.org/x/net v0.0.0-20210428140749-89ef3d95e781/go.mod h1:OJAsFXCWl8Ukc7SiCT/9KSuxbyM7479/AVlXFRxuMCk=
 golang.org/x/sync v0.11.0 h1:GGz8+XQP4FvTTrjZPzNKTMFtSXH80RAzG+5ghFPgK9w=
 golang.org/x/sync v0.11.0/go.mod h1:Czt+wKu1gCyEFDUtn0jG5QVvpJ6rzVqr5aXyt9drQfk=
 golang.org/x/sys v0.13.0 h1:Af8nKPmuFypiUBjVoU9V20FiaFXOcuZI21p0ycVYYGE=

@@ -9,7 +9,7 @@ require (
 	github.com/sirupsen/logrus v1.10.2
 	github.com/xm-utils/tools/database v1.1.0
 	github.com/xm-utils/tools/deadletter v1.0.2
-	github.com/xm-utils/tools/mq/core v0.0.0-00010101000000-000000000000
+	github.com/xm-utils/tools/mq/core v0.0.0-20261120075555-916e5352375e
 	github.com/xm-utils/tools/redis v1.0.0
 	github.com/xm-utils/tools/retry v1.0.2
 )
@@ -29,6 +29,3 @@ require (
 	gorm.io/driver/mysql v1.6.0 // indirect
 	gorm.io/gorm v1.31.2 // indirect
 )
-
-// SPLIT-PLACEHOLDER: 门面提交推送后替换为真实 pseudo-version 并删除本 replace。
-replace github.com/xm-utils/tools/mq/core => ../core

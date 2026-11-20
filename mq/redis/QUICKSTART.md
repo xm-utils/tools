@@ -98,10 +98,10 @@ streamProducer, _, _ := mqstream.NewProducerWithConfig(queue.DefaultRedisConfig(
 go func() { _ = streamConsumer.Subscribe(ctx, "order-service", "orders", bizHandler) }()
 ```
 
-门面只需 `Produce` / `Subscribe` / `Commit` 三个动作；如需直接用队列本体的
-装饰器（重试 / 幂等 / 死信）、PendingChecker 巡检或多消费者管理，
-直接 import `stream/queue`：见 [stream/queue/README.md](stream/queue/README.md)
-与 [stream/queue/USAGE_EXAMPLE.md](stream/queue/USAGE_EXAMPLE.md)。
+门面只需 `Produce` / `Subscribe` / `Commit` 三个动作。队列本体的装饰器（重试 / 幂等 /
+死信）、PendingChecker 巡检与多消费者管理**当前处于注释状态**（门面适配器未使用它们，
+注释后可收窄 `mq/redis` 的依赖树），需要时去掉对应文件的 `/* */` 即可恢复：
+见 [stream/queue/README.md](stream/queue/README.md)。
 
 ## 4. 发布/订阅广播（at-most-once，接口不变但语义降级）
 

@@ -3,6 +3,15 @@
 > 本包现为 `github.com/xm-utils/tools/mq/redis` 模块的队列本体（包路径 `stream/queue`，包名
 > `queue`，原顶层独立组件 `tools/redis_stream_queue`）。走 `mq.Producer` / `mq.Consumer`
 > 门面语义请看 [../../README.md](../../README.md)，本文描述本体能力与装饰器体系。
+>
+> **当前启用范围**：门面适配器只使用 `CreateRedisClient`、`RedisConfig` / `QueueConfig`、
+> `StreamMessage` 以及 `StreamQueue` 的 `InitStream` / `EnqueueMessage` / `ReadMessages` /
+> `AckMessage`（+内部 `DelMessage`）。本文其余章节描述的 `Consumer` / `ConsumerBuilder`、
+> 装饰器（重试 / 幂等 / 死信）、`MultiStreamConsumer`、`PendingChecker`、`MetricsMonitor`
+> 与 `AlertConfig`，连同 `GetPendingMessages` / `ClaimMessage` / `GetStreamLength`，
+> 已在各自文件内以 `/* */` 整体注释保留（代码未删除，去掉注释符即可恢复），
+> 目的就是把 `tools/redis`、`tools/deadletter`、`tools/retry`、`tools/database`、`ants/v2`
+> 挡在 `mq/redis` 的依赖树之外。
 
 ## 📋 目录
 

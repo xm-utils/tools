@@ -1,4 +1,8 @@
+// 本文件的队列增强能力当前未被 mq/redis/stream 门面适配器使用，故整体注释保留；
+// 恢复时删除本说明与紧邻的 /* */ 即可。
 package queue
+
+/*
 
 import (
 	"context"
@@ -45,3 +49,4 @@ func (dc *DecoratorChain) Build(baseHandler MessageHandler) MessageHandler {
 	return handler
 	//return EnhancedHandler(handler)
 }
+*/

@@ -3,8 +3,7 @@
 `github.com/xm-utils/tools/mq/redis`
 
 实现 [tools/mq](../core/README.md) 门面契约的 Redis 侧适配器，按数据结构与投递语义分为四个子包，
-互不依赖，按需 import（只用 list / zset / pubsub 不会把 `stream/queue` 队列本体及其
-GORM / deadletter / retry 依赖拉入构建）：
+互不依赖，按需 import（只用 list / zset / pubsub 不会把 `stream/queue` 队列本体拉入构建）：
 
 | 子包 | 底层结构 | 投递语义 | 典型场景 |
 |---|---|---|---|
@@ -17,7 +16,7 @@ GORM / deadletter / retry 依赖拉入构建）：
 
 - **同一信封跨形态字节兼容**：三种队列型形态共享 JSON 信封（`internal/envelope`），同一条 `mq.Message` 在 list / zset / stream 间迁移无需转换，重投计数、Key、Headers 语义单点维护
 - **额度内重投 + 终态钩子**：Handler 返回 error 时按 `MaxRequeue`（默认 3）就地重投，超限走 `Rejected` 钩子 / 死信 key，防热循环打爆下游
-- **崩溃残留兜底**：list 支持启动时把 processing 残留原子回补 ready；zset 由 `VisibilityTimeout` 后台自动回收；stream 由 PEL 留存配合 XCLAIM / `stream/queue` 的 PendingChecker 巡检
+- **崩溃残留兜底**：list 支持启动时把 processing 残留原子回补 ready；zset 由 `VisibilityTimeout` 后台自动回收；stream 由 PEL 留存，可经 XCLAIM 手动接管（本体 `PendingChecker` 当前处于注释状态，见下文「本体启用范围」）
 - **零全局状态耦合**：适配器直接接收 `*redis.Client`（`go-redis/v8`），不依赖 `tools/redis` 组件的全局连接与 key 前缀约定（`stream/queue` 队列本体除外，它自带连接工厂）
 - **miniredis 真实协议层集成测试**：含 Lua 脚本、消费者组命令、SUBSCRIBE/PUBLISH，无需外部 Redis
 
@@ -34,7 +33,7 @@ mq/redis/                       # 独立 go.mod
 ├── list/       producer.go|consumer.go|scripts.go|list_test.go
 ├── zset/       producer.go|consumer.go|scripts.go|zset_test.go
 ├── stream/     producer.go|consumer.go|envelope_test.go|stream_test.go
-│   └── queue/  package queue    # Redis Stream 可靠队列本体（消费者组/装饰器/Pending 巡检/指标）
+│   └── queue/  package queue    # Stream 队列本体（启用范围见下）
 ├── pubsub/     producer.go|consumer.go|pubsub_test.go
 └── internal/envelope/          # 队列型三形态共享信封（模块内部，不对外）
 ```
@@ -50,6 +49,18 @@ import (
     mqpubsub "github.com/xm-utils/tools/mq/redis/pubsub"
 )
 ```
+
+## 本体启用范围
+
+`stream/queue` 当前只保留门面适配器实际调用的能力：`CreateRedisClient`、`RedisConfig` /
+`QueueConfig`、`StreamMessage` 与 `StreamQueue` 的 `InitStream` / `EnqueueMessage` /
+`ReadMessages` / `AckMessage`（+内部 `DelMessage`）。
+
+原组件的以下能力**已在各自文件内整体注释保留**（去掉 `/* */` 即恢复）：`Consumer`
+封装与 `ConsumerBuilder`、`DecoratorChain` 与重试 / 幂等 / 死信装饰器、
+`MultiStreamConsumer`、`PendingChecker`、`MetricsMonitor` 与 `AlertConfig`，以及
+`GetPendingMessages` / `ClaimMessage` / `GetStreamLength`。因此 `mq/redis` 不再引入
+`tools/redis`、`tools/deadletter`、`tools/retry`、`tools/database`、`ants/v2`。
 
 ## 构造函数与装配项
 
@@ -136,7 +147,7 @@ pubsub 广播到达每个在线订阅者、通配订阅、缓冲满降级、Redi
 ## 相关模块
 
 - 门面契约：[../core/README.md](../core/README.md)
-- Stream 队列本体：[stream/queue/README.md](stream/queue/README.md)、[USAGE_EXAMPLE.md](stream/queue/USAGE_EXAMPLE.md)
+- Stream 队列本体：[stream/queue/README.md](stream/queue/README.md)、[USAGE_EXAMPLE.md](stream/queue/USAGE_EXAMPLE.md)（文档描述的是组件全量能力，当前启用范围见上文[本体启用范围](#本体启用范围)）
 - Kafka 适配器：[../kafka/README.md](../kafka/README.md)
 - pipeline 桥接：[../pipequeue/README.md](../pipequeue/README.md)
 - 快速上手：[QUICKSTART.md](QUICKSTART.md)

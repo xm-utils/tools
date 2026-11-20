@@ -1,5 +1,10 @@
 # Redis Stream Queue 使用示例
 
+> 本文示例大多演示 `ConsumerBuilder`、装饰器、`PendingChecker` 等增强能力，它们当前
+> 已在各自文件内以 `/* */` 整体注释保留（门面适配器未使用），直接复制会编译失败。
+> 现在可用的入队 / 读取 / 确认能力请看 [README.md](README.md) 的「当前启用范围」，
+> 门面级用法看 [../../QUICKSTART.md](../../QUICKSTART.md)。
+
 ## 基本用法
 
 ### 1. 使用默认配置

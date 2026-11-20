@@ -50,6 +50,10 @@ func DefaultQueueConfig(streamKey, groupName string) *QueueConfig {
 
 // ==================== 监控与告警配置 ====================
 
+// 告警配置随指标监控一同注释：DefaultAlertConfig 引用的阈值常量定义在
+// metrics_monitor.go，该文件当前整体处于注释状态。
+
+/*
 // AlertConfig 告警配置
 type AlertConfig struct {
 	StreamLengthThreshold int64         // Stream 长度告警阈值
@@ -69,3 +73,4 @@ var DefaultAlertConfig = &AlertConfig{
 	AlertCheckInterval:    1 * time.Minute,
 	AlertCooldown:         10 * time.Minute,
 }
+*/

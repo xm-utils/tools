@@ -16,7 +16,7 @@ Go 微服务基础设施工具集，提供数据库访问、缓存、消息队�
 | `beego/database` | Beego ORM 数据库工具库（兼容旧项目） | — |
 | `redis` | Redis 客户端封装：String / Hash / List / Set / SortedSet / Stream 全数据结构操作 | [README](redis/README.md) |
 | `mq/core` | 消息队列统一门面（纯契约，零第三方依赖）：Message / Handler / Producer / Consumer 抽象与多后端选型矩阵 | [README](mq/core/README.md) |
-| `mq/redis` | Redis 侧适配器四形态：list 安全队列 / zset 延迟队列 / stream 消费者组 / pubsub 广播；含 `stream/queue` 队列本体（消费者组、装饰器重试/幂等/死信、Pending 巡检） | [README](mq/redis/README.md) · [QUICKSTART](mq/redis/QUICKSTART.md) |
+| `mq/redis` | Redis 侧适配器四形态：list 安全队列 / zset 延迟队列 / stream 消费者组 / pubsub 广播；含 `stream/queue` 队列本体（当前仅启用 Stream 基础读写，装饰器 / Pending 巡检 / 指标已注释保留） | [README](mq/redis/README.md) · [QUICKSTART](mq/redis/QUICKSTART.md) |
 | `mq/kafka` | Kafka 侧适配器：手动 offset 模式生产 / 消费与额度内重投；含 `client` 客户端本体（Worker Pool、消息去重、指标监控） | [README](mq/kafka/README.md) · [client](mq/kafka/client/README.md) |
 | `mq/pipequeue` | pipeline 引擎 × MQ 门面桥接队列：推送→拉取转换、终态钩子回写确认 | [README](mq/pipequeue/README.md) |
 | `mongodb` | MongoDB 客户端：连接管理、泛型 CRUD、聚合管道 | [README](mongodb/README.md) · [QUICKSTART](mongodb/QUICKSTART.md) |

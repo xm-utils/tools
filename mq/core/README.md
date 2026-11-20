@@ -139,7 +139,9 @@ func InvokeHandler(ctx context.Context, handler Handler, msg *Message) error
 ## 依赖与构建说明
 
 - 门面 `mq/core`：零第三方依赖（仅 stdlib），无 go.sum；被三个平台模块引用。
-- `mq/redis`：`go-redis/v8` + `logrus` + `stream/queue` 队列本体带来的仓内依赖（`tools/redis`、`tools/deadletter`、`tools/retry`、`tools/database`（GORM）、`ants/v2`）；`miniredis` 为测试依赖，四形态均做真实协议层集成测试（含 Lua 脚本、SUBSCRIBE/PUBLISH、Stream 消费者组命令）。
+- `mq/redis`：`go-redis/v8` + `logrus`；`stream/queue` 队列本体当前只启用 Stream 基础读写（XADD / XREADGROUP / XACK / XDEL），
+  因此不再引入 `tools/redis`、`tools/deadletter`、`tools/retry`、`tools/database`（GORM）与 `ants/v2`（对应增强能力
+  已在文件内注释保留，恢复后这些依赖会重新进入 `go.mod`）；`miniredis` 为测试依赖，四形态均做真实协议层集成测试（含 Lua 脚本、SUBSCRIBE/PUBLISH、Stream 消费者组命令）。
 - `mq/kafka`：`segmentio/kafka-go` + `logrus`（客户端本体与适配器同模块，不再有仓内跨模块依赖）。
 - `mq/pipequeue`：`tools/pipeline`（`pipeline/v0.0.1`，编译期契约引用）+ `logrus`。
 - 本体与适配器同模块共存：只用门面语义时 import 适配器根包，需要直接操作底层客户端（Worker Pool、去重、指标）时 import `client` / `queue` 子包，两者编译期同步演进。

@@ -1,6 +1,11 @@
-// Package queue 提供基于 Redis Stream 的可靠消息队列能力：消费者组消费、
-// 装饰器化的重试 / 幂等 / 死信、Pending 巡检、多消费者管理与指标监控。
-// 它既是 mq/redis/stream 门面适配器的底层基座，也可脱离门面单独使用。
+// Package queue 提供基于 Redis Stream 的消息队列基础能力：入队（XADD）、
+// 消费者组读取（XREADGROUP）、确认（XACK）与删除（XDEL），是 mq/redis/stream
+// 门面适配器的底层基座。
+//
+// 原组件的消费者封装、装饰器（重试 / 幂等 / 死信）、多消费者管理、Pending 巡检与
+// 指标监控当前未被门面适配器使用，已在各自文件内整体注释保留（见 consumer.go、
+// consumer_builder.go、decorator*.go、message_*.go、multi_consumer_manager.go、
+// pending_checker.go、metrics_monitor.go），需要时去掉 /* */ 即可恢复。
 package queue
 
 import (
@@ -16,16 +21,16 @@ const (
 	// StreamMaxLen 队列最大长度限制 (每个 Stream 最多保留 100万条消息)
 	StreamMaxLen = 1000000
 
-	// DeadLetterKey 死信队列 Key
-	DeadLetterKey = "stream:dead_letter"
-
-	// PendingCheckInterval Pending 消息检查间隔
-	PendingCheckInterval = 60 * time.Second
-
 	// 消费者配置
 	ReadBatchCount = 100             // XREADGROUP COUNT 参数: 每次拉取100条
 	ReadBlockMs    = 5 * time.Second // XREADGROUP BLOCK 参数: 阻塞5秒
 )
+
+// 以下常量随对应增强能力一同注释（DeadLetterKey 供死信装饰器使用，
+// PendingCheckInterval 供 Pending 巡检使用），恢复装饰器 / 巡检时一并放开：
+//
+//	DeadLetterKey        = "stream:dead_letter"
+//	PendingCheckInterval = 60 * time.Second
 
 // ==================== 消息体结构 ====================
 
@@ -162,7 +167,8 @@ func (m *StreamQueue) AckMessage(ctx context.Context, messageID string) error {
 	return nil
 }
 
-// GetPendingMessages 获取待处理的消息 (XPENDING)
+/*
+// GetPendingMessages 获取待处理的消息 (XPENDING) —— 当前仅供已注释的 PendingChecker 使用
 func (m *StreamQueue) GetPendingMessages(ctx context.Context) ([]redis.XPendingExt, error) {
 	pending, err := m.client.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: m.config.StreamKey,
@@ -212,7 +218,7 @@ func (m *StreamQueue) ClaimMessage(ctx context.Context, consumerName string, mes
 	return nil, nil
 }
 
-// GetStreamLength 获取 Stream 长度
+// GetStreamLength 获取 Stream 长度 —— 当前仅供已注释的 MetricsMonitor 使用
 func (m *StreamQueue) GetStreamLength(ctx context.Context) (int64, error) {
 	length, err := m.client.XLen(ctx, m.config.StreamKey).Result()
 	if err != nil {
@@ -220,6 +226,7 @@ func (m *StreamQueue) GetStreamLength(ctx context.Context) (int64, error) {
 	}
 	return length, nil
 }
+*/
 
 // DelMessage 删除消息
 func (m *StreamQueue) DelMessage(ctx context.Context, messageID string) error {

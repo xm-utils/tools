@@ -1,0 +1,24 @@
+# logging 组件配置模板（字段与 logging.Config 的 yaml tag 一一对应）
+logging:
+  # 服务名：每条日志附加 service 字段，也是动态调级键 /log/level/<service> 的来源
+  service: order-svc
+  # 初始级别 panic/fatal/error/warn/info/debug/trace，留空默认 info
+  level: info
+  # JSON 结构化输出，默认 true；置 false 使用文本格式
+  json: true
+  # 是否输出调用方文件与行号
+  caller: false
+  # traceId 字段键名，留空默认 trace_id
+  trace_key: trace_id
+  # 日志文件路径；留空仅输出控制台（os.Stderr）；非空时按大小轮转（lumberjack）
+  output_file: /var/log/order-svc/app.log
+  # 写文件时是否同时保留控制台输出，默认 true
+  also_stdout: true
+  # 单文件轮转阈值（MB），0 沿用 lumberjack 默认 100
+  max_size_mb: 100
+  # 保留旧日志文件数，0 为不限
+  max_backups: 7
+  # 按天数清理旧日志，0 为不按时间清理
+  max_age_days: 30
+  # 是否 gzip 压缩轮转后的旧日志
+  compress: false

@@ -17,6 +17,7 @@ import (
 
 	"github.com/xm-utils/tools/mq/core"
 	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
+	"github.com/xm-utils/tools/trace"
 )
 
 // 默认失败重投额度：与 mq/kafka 语义对齐，超限进终态，防「重投-再消费」热循环。
@@ -226,7 +227,10 @@ func (c *Consumer) dispatch(ctx context.Context, sub *subscription, sm *rs.Strea
 	// 相同 entry 的在途登记不互撞，Commit 能 XACK 到正确消费者组
 	msg.ID = flightID(sub.group, msg.ID)
 
-	err := mq.InvokeHandler(ctx, handler, msg)
+	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx。
+	hctx, end := trace.StartConsumerSpan(ctx, traceName, "stream receive "+sub.topic, msg.Headers)
+	err := mq.InvokeHandler(hctx, handler, msg)
+	end()
 	switch {
 	case err == nil:
 		c.ack(ctx, sub, sm.MessageID)

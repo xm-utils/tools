@@ -15,6 +15,7 @@ import (
 
 	"github.com/xm-utils/tools/mq/core"
 	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
+	"github.com/xm-utils/tools/trace"
 )
 
 // defaultHealthCheck 订阅连接健康检查间隔，取 go-redis Channel 模式默认值；
@@ -191,7 +192,10 @@ func (c *Consumer) dispatch(ctx context.Context, sub *subscription, m *redis.Mes
 	}
 	msg := e.ToMessage(topic, "", m)
 
-	err := mq.InvokeHandler(ctx, handler, msg)
+	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx。
+	hctx, end := trace.StartConsumerSpan(ctx, traceName, "pubsub receive "+topic, msg.Headers)
+	err := mq.InvokeHandler(hctx, handler, msg)
+	end()
 	switch {
 	case err == nil:
 		// 投递完成，无确认动作

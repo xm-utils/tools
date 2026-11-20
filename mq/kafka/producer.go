@@ -15,7 +15,11 @@ import (
 	xmkafka "github.com/xm-utils/tools/mq/kafka/client"
 
 	"github.com/xm-utils/tools/mq/core"
+	"github.com/xm-utils/tools/trace"
 )
+
+// tracerName 链路追踪 tracer 名（与错误前缀口径一致）。
+const tracerName = "mq/kafka"
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）；
 // Consumer 失败重投与 Reject(requeue=true) 均自增该值。
@@ -38,6 +42,12 @@ func (p *Producer) Produce(ctx context.Context, topic string, msg *mq.Message) e
 	if msg == nil {
 		return fmt.Errorf("mq/kafka: 消息不能为 nil")
 	}
+	// 开启 PRODUCER span 并把 traceparent 写入消息头，随 Kafka header 传播到消费端。
+	if msg.Headers == nil {
+		msg.Headers = map[string]string{}
+	}
+	_, end := trace.StartProducerSpan(ctx, tracerName, "kafka produce "+topic, msg.Headers)
+	defer end()
 	km, err := toKafkaMessage(topic, msg)
 	if err != nil {
 		return err
@@ -51,11 +61,18 @@ func (p *Producer) ProduceBatch(ctx context.Context, topic string, msgs []*mq.Me
 	if len(msgs) == 0 {
 		return nil
 	}
+	// 整批共用一个 PRODUCER span，逐个消息注入同一 traceparent（同一逻辑发送）。
+	batchCtx, end := trace.StartProducerSpan(ctx, tracerName, "kafka produce "+topic, nil)
+	defer end()
 	kms := make([]segkafka.Message, 0, len(msgs))
 	for _, m := range msgs {
 		if m == nil {
 			return fmt.Errorf("mq/kafka: 批量消息中包含 nil 元素")
 		}
+		if m.Headers == nil {
+			m.Headers = map[string]string{}
+		}
+		trace.InjectMap(batchCtx, m.Headers)
 		km, err := toKafkaMessage(topic, m)
 		if err != nil {
 			return err

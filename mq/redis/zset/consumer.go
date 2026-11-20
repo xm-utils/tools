@@ -14,6 +14,7 @@ import (
 
 	"github.com/xm-utils/tools/mq/core"
 	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
+	"github.com/xm-utils/tools/trace"
 )
 
 // emptyBackoff 领取失败（非空队列）后的退避间隔，防持续错误热循环。
@@ -210,7 +211,10 @@ func (c *Consumer) dispatch(ctx context.Context, sub *subscription, member strin
 	}
 	msg := e.ToMessage(topic, "", member)
 
-	err := mq.InvokeHandler(ctx, handler, msg)
+	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx。
+	hctx, cend := trace.StartConsumerSpan(ctx, traceName, "zset receive "+topic, msg.Headers)
+	err := mq.InvokeHandler(hctx, handler, msg)
+	cend()
 	switch {
 	case err == nil:
 		if ackErr := c.ack(ctx, sub, member); ackErr != nil {

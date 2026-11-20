@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"time"
@@ -30,6 +31,11 @@ type Config struct {
 	SlowCallDuration     time.Duration `yaml:"slow_call_duration"`     // 慢调用阈值
 	WindowSize           time.Duration `yaml:"window_size"`            // 滑动窗口大小
 	MinRequests          int           `yaml:"min_requests"`           // 最小请求数
+	// EnableTracing 是否为出站请求接入链路追踪（基于 trace 组件的 traced RoundTripper）。
+	// 开启前需由 app 调用 trace.Init 装配全局 Provider；未 Init 时 transport 为透传零行为。
+	EnableTracing bool `yaml:"enable_tracing"`
+	// TracerName 追踪 span 所属的 tracer 名，默认 "httpclient"。
+	TracerName string `yaml:"tracer_name"`
 }
 
 // LogKeeper HTTP请求日志持久化接口，由外部注入实现，避免循环依赖
@@ -61,9 +67,18 @@ type HttpRequest struct {
 	Headers     map[string]string
 	Body        interface{}
 	Files       []MultipartField
-	ServiceType string // 服务类型标识，用于日志记录
-	AppId       int64  // 应用ID，用于日志记录
-	RequestId   string // 请求唯一标识，由业务方产生并随请求一起持久化；为空时由客户端兜底生成
+	ServiceType string          // 服务类型标识，用于日志记录
+	AppId       int64           // 应用ID，用于日志记录
+	RequestId   string          // 请求唯一标识，由业务方产生并随请求一起持久化；为空时由客户端兜底生成
+	Ctx         context.Context // 调用方上下文（可为 nil）；开启链路追踪时用于承接上游 trace 上下文，使出站 span 挂到调用链下
+}
+
+// ctxOrBackground 返回请求上下文，为空时回退 context.Background。
+func (r *HttpRequest) ctxOrBackground() context.Context {
+	if r.Ctx != nil {
+		return r.Ctx
+	}
+	return context.Background()
 }
 
 // NewHttpRequest 构建基础的 HttpRequest，预置用于日志记录的 appId 与 serviceType，

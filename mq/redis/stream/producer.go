@@ -16,7 +16,11 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/xm-utils/tools/mq/core"
 	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
+	"github.com/xm-utils/tools/trace"
 )
+
+// traceName 链路追踪 tracer 名（与错误前缀口径一致）。
+const traceName = "mq/redis/stream"
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。
 const HeaderAttempt = mq.HeaderAttempt
@@ -67,6 +71,12 @@ func (p *Producer) Produce(ctx context.Context, topic string, msg *mq.Message) e
 	if topic == "" {
 		return fmt.Errorf("mq/redis/stream: topic(stream key) 不能为空")
 	}
+	// 开启 PRODUCER span 并把 traceparent 写入消息头（经信封 Headers 传播）。
+	if msg.Headers == nil {
+		msg.Headers = map[string]string{}
+	}
+	_, end := trace.StartProducerSpan(ctx, traceName, "stream produce "+topic, msg.Headers)
+	defer end()
 	env := toEnvelope(msg)
 	payload, err := env.Encode()
 	if err != nil {

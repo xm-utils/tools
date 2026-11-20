@@ -13,6 +13,7 @@ import (
 	xmkafka "github.com/xm-utils/tools/mq/kafka/client"
 
 	"github.com/xm-utils/tools/mq/core"
+	"github.com/xm-utils/tools/trace"
 )
 
 // 默认失败重投上限：Kafka 无原生单消息重投，重投经生产者回环实现，
@@ -228,7 +229,11 @@ func (c *Consumer) consumeLoop(ctx context.Context, sub *subscription, handler m
 
 // dispatch 处理单条消息的确认分派：成功提交 / 手动确认登记 / 失败重投或终态。
 func (c *Consumer) dispatch(ctx context.Context, sub *subscription, km segkafka.Message, msg *mq.Message, handler mq.Handler) {
-	err := mq.InvokeHandler(ctx, handler, msg)
+	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx；
+	// 确认/重投等网络操作仍用循环 ctx（与本 span 生命周期解耦）。
+	hctx, end := trace.StartConsumerSpan(ctx, tracerName, "kafka receive "+msg.Topic, msg.Headers)
+	err := mq.InvokeHandler(hctx, handler, msg)
+	end()
 	switch {
 	case err == nil:
 		c.commitNative(ctx, sub, km, msg.ID)

@@ -21,7 +21,11 @@ import (
 
 	"github.com/xm-utils/tools/mq/core"
 	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
+	"github.com/xm-utils/tools/trace"
 )
+
+// traceName 链路追踪 tracer 名（与错误前缀口径一致）。
+const traceName = "mq/redis/list"
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。
 const HeaderAttempt = mq.HeaderAttempt
@@ -111,6 +115,12 @@ func (p *Producer) Produce(ctx context.Context, topic string, msg *mq.Message) e
 	if topic == "" {
 		return fmt.Errorf("mq/redis/list: topic 不能为空")
 	}
+	// 开启 PRODUCER span 并把 traceparent 写入消息头（经信封 Headers 持久化传播）。
+	if msg.Headers == nil {
+		msg.Headers = map[string]string{}
+	}
+	_, end := trace.StartProducerSpan(ctx, traceName, "list produce "+topic, msg.Headers)
+	defer end()
 	e := envpkg.FromMessage(msg)
 	if e.ID == "" {
 		e.ID = newMessageID()
@@ -134,11 +144,18 @@ func (p *Producer) ProduceBatch(ctx context.Context, topic string, msgs []*mq.Me
 	if topic == "" {
 		return fmt.Errorf("mq/redis/list: topic 不能为空")
 	}
+	// 整批共用一个 PRODUCER span，逐个注入同一 traceparent。
+	batchCtx, end := trace.StartProducerSpan(ctx, traceName, "list produce "+topic, nil)
+	defer end()
 	payloads := make([]interface{}, 0, len(msgs))
 	for _, m := range msgs {
 		if m == nil {
 			return fmt.Errorf("mq/redis/list: 批量消息中包含 nil 元素")
 		}
+		if m.Headers == nil {
+			m.Headers = map[string]string{}
+		}
+		trace.InjectMap(batchCtx, m.Headers)
 		e := envpkg.FromMessage(m)
 		if e.ID == "" {
 			e.ID = newMessageID()

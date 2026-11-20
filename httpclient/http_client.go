@@ -16,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/xm-utils/tools/breaker"
 	"github.com/xm-utils/tools/retry"
+	"github.com/xm-utils/tools/trace"
 )
 
 // DefaultConfig 默认HTTP客户端配置
@@ -58,6 +59,16 @@ func newHttpClient(config *Config, lk LogKeeper) *HttpClient {
 	// 创建HTTP客户端
 	httpClient := &http.Client{
 		Timeout: config.Timeout,
+	}
+
+	// 按需为出站请求接入链路追踪（trace 未 Init 时 transport 为透传零行为）。
+	if config.EnableTracing {
+		tracerName := config.TracerName
+		if tracerName == "" {
+			tracerName = "httpclient"
+		}
+		httpClient.Transport = trace.NewTracedTransport(tracerName, http.DefaultTransport)
+		log.WithField("tracer", tracerName).Info("HTTP Client: 链路追踪已启用")
 	}
 
 	// 创建重试配置
@@ -316,8 +327,8 @@ func (h *HttpClient) prepareRequest(req *HttpRequest) (*http.Request, error) {
 		}).Debug("HTTP Client: 发送请求")
 	}
 
-	// 创建HTTP请求
-	httpReq, err := http.NewRequest(req.Method, req.URL, body)
+	// 创建HTTP请求（携带调用方 ctx，供链路追踪把出站 span 挂到上游链路下）
+	httpReq, err := http.NewRequestWithContext(req.ctxOrBackground(), req.Method, req.URL, body)
 	if err != nil {
 		h.log.WithFields(logrus.Fields{
 			"error": err,

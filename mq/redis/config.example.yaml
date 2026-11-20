@@ -1,0 +1,55 @@
+# mq/redis 配置模板（Redis 四种形态：list 安全队列 / zset 延迟队列 / stream 消费者组 / pubsub 广播）
+#
+# 适配器直接复用底层配置结构体：stream 的 Producer/Consumer 构造收
+# tools/mq/redis/stream/queue.RedisConfig，其余三形态收本模块内 Options。
+# 门面层没有统一的 YAML 加载入口，业务可用 viper/yaml 反序列化后映射到对应结构体。
+# 四种形态互不依赖：只用 list 时可不配置 redis_stream_options。
+
+# ---------- Redis 连接（stream 后端复用 tools/mq/redis/stream/queue.RedisConfig；
+# ---------- list/zset/pubsub 用 go-redis Options 自行建连，字段同源） ----------
+redis:
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  pool_size: 10
+  min_idle_conns: 5
+  max_retries: 3
+  dial_timeout: 5s
+  read_timeout: 3s
+  write_timeout: 3s
+
+# ---------- Redis Stream 消费者组队列（mq/redis/stream.Options 装配项） ----------
+redis_stream_options:
+  max_requeue: 3                 # WithMaxRequeue：Handler 失败就地 XADD 重投额度，0 取默认 3，负数关闭
+  dead_letter_key: ""            # WithDeadLetterKey：达额度终态消息转入的死信 Stream（空=不转）
+  consumer_name: ""              # WithConsumerName：空则自动生成分布式唯一名 <组名>-<hostname>-<pid>-<序号>
+
+# ---------- Redis List 安全队列（mq/redis/list.Options 字段） ----------
+redis_list_options:
+  key_prefix: "mq:list:"         # ready/processing 列表 key 前缀（ready=<key>，processing=<key>:processing）
+  consumer_name: ""              # 投递 ID 前缀，空则生成 redis-list-<hostname>-<pid>
+  max_requeue: 3                 # 失败重投额度；0 取默认 3，负数关闭（交业务 Reject(requeue) 主导）
+  dead_letter_key: ""            # 终态死信 List key（空=不转，仅 XACK 等价移除）
+  poll_interval: 100ms           # 队列空时轮询间隔
+  recover_processing: false      # 订阅启动时把 processing 残留原子回补 ready（单活动消费者假设）
+
+# ---------- Redis 有序集合延迟队列（mq/redis/zset.Options 字段） ----------
+redis_zset_options:
+  key_prefix: "mq:zset:"         # ready/processing 集合 key 前缀
+  consumer_name: ""              # 投递 ID 前缀，空则生成 redis-zset-<hostname>-<pid>
+  max_requeue: 3
+  dead_letter_key: ""            # 终态死信集合 key（score=失败时刻）
+  poll_interval: 100ms
+  visibility_timeout: 0s         # >0 启用：processing 中超时未确认的消息自动回收重投
+  reclaim_batch: 50              # 单轮回收条数上限
+  # 延迟投递经消息头指定：X-Mq-Delay（相对毫秒）/ X-Mq-Ready-At（unix 毫秒，两者同存后者优先）
+
+# ---------- Redis 发布/订阅广播（mq/redis/pubsub.Options 字段） ----------
+# 无持久化与确认语义：Commit/Reject 为 no-op，失败不可重投，离线订阅者收不到消息
+redis_pubsub_options:
+  channel_prefix: "mq:ps:"       # 频道名前缀（频道 = <前缀><topic>）
+  consumer_name: ""              # 订阅者标识（日志与投递 ID 前缀），空则生成 redis-pubsub-<hostname>-<pid>
+  pattern: false                 # true 时 topic 作 glob 模式（PSUBSCRIBE，如 "orders.*"）
+  channel_buffer: 100            # 订阅侧缓冲条数；满时接收协程阻塞至多 1 分钟，超时丢弃该条新消息
+  health_check_interval: 3s      # 连接探活/重连间隔；0 取默认 3s，负数关闭（不建议）
+  # rejected 钩子（WithRejected）为代码注入，无 yaml 形态

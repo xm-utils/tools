@@ -11,7 +11,7 @@
 // 一次性消息。同一消息需要被多个实例各自处理时，本后端是唯一「每实例都收到」的适配器
 // （队列型后端多实例分流，一条消息只投一个消费者）。
 //
-// 消息体沿用共享 JSON 信封（mq/internal/envelope），与其余 Redis 后端字节级兼容。
+// 消息体沿用共享 JSON 信封（mq/redis/internal/envelope），与其余 Redis 后端字节级兼容。
 // topic 映射为频道名（前缀由 Options.ChannelPrefix 控制），group 参数仅作订阅登记
 // 与日志维度，无消费组语义。
 package pubsub
@@ -25,8 +25,8 @@ import (
 
 	"github.com/go-redis/redis/v8"
 
-	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
+	"github.com/xm-utils/tools/mq/core"
+	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
 )
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。

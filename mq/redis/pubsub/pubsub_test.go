@@ -10,7 +10,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 // newTestClient 启动内存 Redis 并返回配套 client（miniredis 关闭随 t 自动结束）。

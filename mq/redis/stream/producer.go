@@ -1,8 +1,8 @@
-// Package stream（mq/redis/stream）提供基于 github.com/xm-utils/tools/redis_stream_queue 的
+// Package stream（mq/redis/stream）提供基于 github.com/xm-utils/tools/mq/redis/stream/queue 的
 // mq 门面适配器。topic 映射为 Stream key，group 映射为消费者组。
 //
 // 消息体封装：mq.Message 的 Key/Body/Headers/重投计数序列化为共享 JSON 信封
-// （mq/internal/envelope，与 redis/list、redis/zset 后端字节级兼容），
+// （mq/redis/internal/envelope，与 redis/list、redis/zset 后端字节级兼容），
 // 承载于组件 StreamMessage.Payload 字段（组件负责 XADD/XREADGROUP/XACK，
 // 信封内容对组件透明）。Metadata 保留组件 *StreamMessage 以便取回 idle 时间等专有信息。
 package stream
@@ -11,11 +11,11 @@ import (
 	"context"
 	"fmt"
 
-	rs "github.com/xm-utils/tools/redis_stream_queue"
+	rs "github.com/xm-utils/tools/mq/redis/stream/queue"
 
 	"github.com/go-redis/redis/v8"
-	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
+	"github.com/xm-utils/tools/mq/core"
+	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
 )
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）。

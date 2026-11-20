@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"testing"
 
-	rs "github.com/xm-utils/tools/redis_stream_queue"
+	rs "github.com/xm-utils/tools/mq/redis/stream/queue"
 
-	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
+	"github.com/xm-utils/tools/mq/core"
+	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
 )
 
 func TestEnvelopeRoundTripBinarySafe(t *testing.T) {

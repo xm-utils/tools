@@ -1,4 +1,4 @@
-// Package kafka 提供基于 github.com/xm-utils/tools/kafka 的 mq 门面适配器。
+// Package kafka 提供基于 github.com/xm-utils/tools/mq/kafka/client 的 mq 门面适配器。
 //
 // Producer 复用组件 Producer（底层 kafka.Writer）发送消息，mq.Message 的
 // Headers 映射为 Kafka 消息头；Consumer 以 FetchMessage/CommitMessages 手动
@@ -12,9 +12,9 @@ import (
 	"time"
 
 	segkafka "github.com/segmentio/kafka-go"
-	xmkafka "github.com/xm-utils/tools/kafka"
+	xmkafka "github.com/xm-utils/tools/mq/kafka/client"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 // HeaderAttempt 重投次数消息头（门面单点定义，与 mq.HeaderAttempt 同值）；

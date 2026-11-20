@@ -7,7 +7,7 @@ import (
 
 	segkafka "github.com/segmentio/kafka-go"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 func TestToKafkaMessageMapsFields(t *testing.T) {

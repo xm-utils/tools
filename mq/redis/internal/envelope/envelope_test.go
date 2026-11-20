@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 func TestFromMessageReadsAttemptHeader(t *testing.T) {

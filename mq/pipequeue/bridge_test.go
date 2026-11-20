@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 	xmpipeline "github.com/xm-utils/tools/pipeline"
 )
 

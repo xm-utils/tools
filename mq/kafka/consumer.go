@@ -10,9 +10,9 @@ import (
 
 	segkafka "github.com/segmentio/kafka-go"
 	"github.com/sirupsen/logrus"
-	xmkafka "github.com/xm-utils/tools/kafka"
+	xmkafka "github.com/xm-utils/tools/mq/kafka/client"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 // 默认失败重投上限：Kafka 无原生单消息重投，重投经生产者回环实现，

@@ -15,9 +15,10 @@ Go 微服务基础设施工具集，提供数据库访问、缓存、消息队�
 | `gorm/database/sharding` | 分库分表：取模分片 / 时间范围分片、Snowflake 主键、自动路由 | [README](gorm/database/sharding/README.md) · [QUICKSTART](gorm/database/sharding/QUICKSTART.md) |
 | `beego/database` | Beego ORM 数据库工具库（兼容旧项目） | — |
 | `redis` | Redis 客户端封装：String / Hash / List / Set / SortedSet / Stream 全数据结构操作 | [README](redis/README.md) |
-| `redis_stream_queue` | 基于 Redis Stream 的可靠消息队列：消费者组、装饰器（重试 / 幂等 / 死信）、Pending 巡检 | [README](redis_stream_queue/README.md) |
-| `kafka` | Kafka 客户端：生产者 / 消费者、Worker Pool、消息去重（内存 / Redis）、指标监控 | [README](kafka/README.md) |
-| `mq` | 消息队列统一门面：Producer / Consumer 抽象，Kafka 与 Redis 四种形态（Stream / List / ZSet 延迟 / 发布订阅）适配器，pipeline 桥接 | [README](mq/README.md) · [QUICKSTART](mq/QUICKSTART.md) |
+| `mq/core` | 消息队列统一门面（纯契约，零第三方依赖）：Message / Handler / Producer / Consumer 抽象与多后端选型矩阵 | [README](mq/core/README.md) |
+| `mq/redis` | Redis 侧适配器四形态：list 安全队列 / zset 延迟队列 / stream 消费者组 / pubsub 广播；含 `stream/queue` 队列本体（消费者组、装饰器重试/幂等/死信、Pending 巡检） | [README](mq/redis/README.md) · [QUICKSTART](mq/redis/QUICKSTART.md) |
+| `mq/kafka` | Kafka 侧适配器：手动 offset 模式生产 / 消费与额度内重投；含 `client` 客户端本体（Worker Pool、消息去重、指标监控） | [README](mq/kafka/README.md) · [client](mq/kafka/client/README.md) |
+| `mq/pipequeue` | pipeline 引擎 × MQ 门面桥接队列：推送→拉取转换、终态钩子回写确认 | [README](mq/pipequeue/README.md) |
 | `mongodb` | MongoDB 客户端：连接管理、泛型 CRUD、聚合管道 | [README](mongodb/README.md) · [QUICKSTART](mongodb/QUICKSTART.md) |
 | `pipeline` | 泛型消息消费执行引擎：步骤链编排、错误分级、步骤超时、有界停机、同 Key 串行 | [README](pipeline/README.md) · [QUICKSTART](pipeline/QUICKSTART.md) |
 | `retry` | 非阻塞重试执行器：多策略（固定 / 指数 / 线性）、批量并发、监控回调 | [README](retry/README.md) · [QUICKSTART](retry/QUICKSTART.md) |
@@ -43,9 +44,14 @@ go get github.com/xm-utils/tools/redis
 
 # 示例：引入重试执行器
 go get github.com/xm-utils/tools/retry
+
+# 示例：引入 MQ 门面 + 择一后端适配器
+go get github.com/xm-utils/tools/mq/core
+go get github.com/xm-utils/tools/mq/redis
 ```
 
-> 模块路径统一前缀：`github.com/xm-utils/tools/<模块目录>`
+> 模块路径统一前缀：`github.com/xm-utils/tools/<模块目录>`；`mq` 族为两级路径（`mq/core`、
+> `mq/redis`、`mq/kafka`、`mq/pipequeue`），顶层 `mq/` 仅为容器目录、自身不是模块。
 
 ## 目录结构
 
@@ -59,20 +65,22 @@ tools/
 ├── gorm/database/        # GORM 数据库（含 sharding 子包）
 ├── grpcx/                # gRPC 工具
 ├── httpclient/           # HTTP 客户端
-├── kafka/                # Kafka 消息队列
 ├── mongodb/              # MongoDB 客户端
-├── mq/                   # 消息队列统一门面（kafka / redis 适配器 / pipequeue 桥接）
+├── mq/                   # 消息队列族（顶层容器，自身无 go.mod）
+│   ├── core/             # 统一门面（纯契约，package mq）
+│   ├── redis/            # Redis 四形态适配器（含 stream/queue 队列本体）
+│   ├── kafka/            # Kafka 适配器（含 client 客户端本体）
+│   └── pipequeue/        # MQ × pipeline 桥接队列
 ├── nacos/                # Nacos 配置/注册中心
 ├── pipeline/             # 消息消费执行引擎
 ├── redis/                # Redis 客户端
-├── redis_stream_queue/   # Redis Stream 可靠队列
 ├── registry/             # 注册中心/配置中心统一抽象（consul/nacos 双适配器）
 └── retry/                # 重试执行器
 ```
 
 ## 设计约定
 
-- **独立模块**：每个组件拥有独立 `go.mod`，可单独版本管理与引入，不强制拉取整个仓库。
+- **独立模块**：每个组件拥有独立 `go.mod`，可单独版本管理与引入，不强制拉取整个仓库；`mq` 族拆为四个同级模块（共用同一门面契约），按需引入以免把无关后端的 SDK 拉进依赖树。
 - **panic 转 error**：对外 API 不向调用方抛出 panic；内部 recover 后包装为 error 返回。
 - **配置模板**：需要外部配置的组件提供 `config.example.yaml`（如 `gorm/database`、`consul`、`nacos`），字段与结构体 yaml tag 一一对应。
 - **文档配套**：核心组件配备 README（完整 API 参考）+ QUICKSTART（5 分钟上手）。

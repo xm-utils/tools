@@ -10,13 +10,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	rs "github.com/xm-utils/tools/redis_stream_queue"
+	rs "github.com/xm-utils/tools/mq/redis/stream/queue"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/sirupsen/logrus"
 
-	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
+	"github.com/xm-utils/tools/mq/core"
+	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
 )
 
 // 默认失败重投额度：与 mq/kafka 语义对齐，超限进终态，防「重投-再消费」热循环。

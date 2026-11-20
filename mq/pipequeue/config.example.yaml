@@ -1,0 +1,15 @@
+# mq/pipequeue 配置模板（pipeline × MQ 桥接装配项，对应代码内 Config 字段）
+#
+# 桥接层不感知 MQ 后端类型：Producer / Consumer 由业务注入任一 mq 实现
+# （mq/kafka、mq/redis 的 list/zset/stream/pubsub 皆可）。
+# 后端为 mq/redis/pubsub（广播）时 ManualAck 与 DurableRetry 均无意义，建议保持 false。
+
+pipequeue:
+  group: order-service           # MQ 消费组，同时作为 pipeline 的 TaskHandlerName
+  topic: orders                  # MQ 主题 / 频道
+  buffer_size: 100               # 领取缓冲深度（同时在途消息上限），队列满即背压
+  manual_ack: true               # 严格 at-least-once：MQ 确认挂到引擎终态钩子，
+                                 # false 时进入引擎即确认（至多一次 + 内存重试）
+  durable_retry: false           # true 时 Submit 失败终态经 Producer 回投 MQ 本体（需注入 Producer）
+  produce_timeout: 5s            # 回投与显式确认操作的上下文缺失时兜底超时
+  # engine / producer / consumer / mq_handler / logger 为代码注入，无 yaml 形态

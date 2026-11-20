@@ -3,7 +3,8 @@
 // 业务代码只依赖本包定义的 Message / Handler / Producer / Consumer 接口，
 // Kafka（mq/kafka）与 Redis 系后端（mq/redis/stream 消费者组队列、
 // mq/redis/list 安全队列、mq/redis/zset 延迟队列、mq/redis/pubsub 发布订阅）
-// 由子包以适配器形式实现接口，切换 MQ 时业务代码零改动。
+// 在各自独立模块中以适配器形式实现接口（本包零第三方依赖），
+// 按部署目标择一引入即可，切换 MQ 时业务代码零改动。
 //
 // 语义约定：
 //   - at-least-once 投递：确认（Commit/Reject）由消费侧驱动，处理成功前不确认；
@@ -62,7 +63,7 @@ func (m *Message) SetHeader(name, value string) {
 //   - nil：处理成功，适配器自动 Commit；
 //   - ErrManualAck：不在 Handler 返回点确认，延迟到业务终态显式 Commit/Reject
 //     （pipeline 桥接即基于该模式把确认时机挂到引擎终态钩子）；
-//   - 其他 error：处理失败，适配器按各自失败策略处置（见子包文档）。
+//   - 其他 error：处理失败，适配器按各自失败策略处置（见各适配模块文档）。
 //
 // Handler 内 panic 会被 InvokeHandler 统一 recover 转为 error，不会击穿消费循环。
 type Handler func(ctx context.Context, msg *Message) error
@@ -89,7 +90,7 @@ type Consumer interface {
 	// Commit 显式确认一条 ErrManualAck 模式下的在途消息（终态成功处置）。
 	// 对已确认/未知消息的重复 Commit 应返回 nil 或明确 error，不得 panic。
 	// 无持久化与确认原语的后端（如 mq/redis/pubsub）下本方法为 no-op 返回 nil，
-	// 投递保证降为 at-most-once，适用边界见子包文档。
+	// 投递保证降为 at-most-once，适用边界见对应适配模块文档。
 	Commit(ctx context.Context, msg *Message) error
 	// Reject 显式否定一条在途消息：requeue=true 重回队列等待再次投递；
 	// requeue=false 终态丢弃（死信留存由业务在调用前自行完成）。

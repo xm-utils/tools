@@ -12,8 +12,8 @@ import (
 	"github.com/go-redis/redis/v8"
 	"github.com/sirupsen/logrus"
 
-	"github.com/xm-utils/tools/mq"
-	envpkg "github.com/xm-utils/tools/mq/internal/envelope"
+	"github.com/xm-utils/tools/mq/core"
+	envpkg "github.com/xm-utils/tools/mq/redis/internal/envelope"
 )
 
 // emptyBackoff 拉取失败（非空队列）后的退避间隔，防持续错误热循环。

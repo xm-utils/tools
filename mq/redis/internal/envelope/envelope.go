@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/xm-utils/tools/mq"
+	"github.com/xm-utils/tools/mq/core"
 )
 
 // HeaderAttempt 重投次数消息头（单点取自门面 mq.HeaderAttempt）；

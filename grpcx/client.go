@@ -225,7 +225,7 @@ var (
 type ServiceConfig struct {
 	Name    string        `yaml:"name"`
 	Address string        `yaml:"address"`
-	Timeout time.Duration `yaml:"timeout"` // 超时时间（秒）
+	Timeout time.Duration `yaml:"timeout"` // 超时时长，直接用于 context.WithTimeout（YAML 需写 "3s" 这类时长串）
 }
 
 // ClientManager 客户端管理器（单例）

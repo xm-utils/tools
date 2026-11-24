@@ -5,8 +5,8 @@
 //   - Tracer / Meter 全局注册：Init 一次装配，业务经 Tracer()/Meter() 取用；
 //   - 上下文贯通辅助：Inject*/Extract* 覆盖 grpc metadata、HTTP Header、
 //     mq.Message.Headers 三类载体，传播格式统一为 W3C traceparent；
-//   - 采样策略：TraceIDRatio 头部采样 + 父级优先（同一条链采样决策一致），
-//     远端动态采样预留 Config.Sampler 扩展点。
+//   - 采样策略：TraceIDRatio 头部采样 + 父级优先（同一条链采样决策一致）；
+//     远端动态采样尚未实现，需要时在 Init 之外自行装配 Provider。
 //
 // 设计约束：
 //   - 对 otel SDK 的适配全部写在本组件内，不 fork 三方库；

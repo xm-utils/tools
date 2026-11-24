@@ -1,0 +1,124 @@
+# trace 组件配置模板
+# =============================================================================
+# 说明
+#   trace 根包不内置 YAML 解析与配置源监听：对外只接受 Go struct
+#   （trace.Config，字段无 yaml tag），由 app 装配层负责把配置源（文件 / 环境
+#   变量 / Nacos / Consul KV）解析成 struct 后传入 trace.Init。
+#   因此本模板描述的是【装配层同构 struct 的键位约定】：左侧 YAML 键与
+#   trace.Config 的 Go 字段一一对应，注释标注了目标字段与校验规则。
+#
+# 生效条件
+#   未调用 trace.Init 时全局为 noop Provider 与空传播器：拦截器、注入提取、
+#   TraceID 提取全部安全零行为，因此本段配置缺失也不会让已接入的代码报错。
+# =============================================================================
+
+trace:
+  # 服务名 → Config.ServiceName，写入 resource 属性 service.name。
+  # Exporter 为 stdout / otlp 时必填（否则 Init 报错）；none 可为空。
+  service_name: order-svc
+
+  # 部署环境 → Config.Environment，可选，写入 deployment.environment。
+  # 留空则不附加该属性。
+  environment: prod
+
+  # 导出器类型 → Config.Exporter。取值 none / stdout / otlp，
+  # 大小写与首尾空格由 Init 归一；非法值返回 error 且不改动既有全局状态。
+  #   none   ：仍注册 SDK Provider（TraceID 正常生成与传播），只是不外送
+  #   stdout ：Span / 指标以 JSON 打印到标准输出（调试用）
+  #   otlp   ：OTLP/gRPC 导出，对接 Collector、Jaeger 等后端
+  exporter: otlp
+
+  # OTLP 收集器地址（host:port）→ Config.Endpoint，exporter=otlp 时必填。
+  # 例：localhost:4317、otel-collector:4317（注意是 gRPC 端口，非 HTTP 端口）
+  endpoint: otel-collector:4317
+
+  # 是否使用明文 gRPC（不带 TLS）→ Config.Insecure。
+  # 采集器与业务同集群内网部署通常为 true；跨网/公网走 TLS 时置 false。
+  insecure: true
+
+  # 采样率 → Config.SampleRatio，生效区间 (0,1]。
+  #   <= 0 归一为 1.0（全采样）；> 1 Init 直接报错（填 20 而非 0.2 是常见错误）。
+  # 采样器为 ParentBased(TraceIDRatioBased)：上游已决策的链路不重新采样，
+  # 只有链路起点按此比率判定，保证同一条 Trace 跨服务后结论一致。
+  sample_ratio: 0.2
+
+  # 传播协议列表 → Config.Propagators。留空/注释掉即默认 [tracecontext, baggage]。
+  # 出现 tracecontext / baggage 之外的取值，Init 会报错而非静默忽略。
+  propagators:
+    - tracecontext # W3C traceparent + tracestate（跨进程链路贯通的主力）
+    - baggage      # W3C baggage，业务自定义透传键值
+
+  # 说明：以下能力无法用 YAML 表达，只能在 Go 代码里装配
+  #   - 远端动态采样：trace 尚未实现，需自行装配 sdktrace.Provider
+  #   - 自定义 resource 属性：ServiceName / Environment 之外的属性 trace 不开放注入
+  #   - 导出器的 TLS 证书、鉴权头：由 otlptracegrpc 的 Option 决定，trace 未透传
+
+# =============================================================================
+# 装配层加载示例
+# =============================================================================
+# 依赖：gopkg.in/yaml.v3（trace 组件本身零 YAML 依赖）
+#
+#   package main
+#
+#   import (
+#       "context"
+#       "fmt"
+#       "os"
+#       "time"
+#
+#       "github.com/xm-utils/tools/trace"
+#       "gopkg.in/yaml.v3"
+#   )
+#
+#   // traceCfg 与 config.example.yaml 的键位同构
+#   type traceCfg struct {
+#       ServiceName string   `yaml:"service_name"`
+#       Environment string   `yaml:"environment"`
+#       Exporter    string   `yaml:"exporter"`
+#       Endpoint    string   `yaml:"endpoint"`
+#       Insecure    bool     `yaml:"insecure"`
+#       SampleRatio float64  `yaml:"sample_ratio"`
+#       Propagators []string `yaml:"propagators"`
+#   }
+#
+#   type appConf struct {
+#       Trace traceCfg `yaml:"trace"`
+#   }
+#
+#   func main() {
+#       ctx := context.Background()
+#
+#       raw, err := os.ReadFile("config.yaml")
+#       if err != nil {
+#           panic(err)
+#       }
+#       var conf appConf
+#       if err := yaml.Unmarshal(raw, &conf); err != nil {
+#           panic(err)
+#       }
+#
+#       // trace.Init 可重入：配置热更新时再次调用即可，旧 Provider 会被替换并关停
+#       if err := trace.Init(ctx, trace.Config{
+#           ServiceName: conf.Trace.ServiceName,
+#           Environment: conf.Trace.Environment,
+#           Exporter:    conf.Trace.Exporter,
+#           Endpoint:    conf.Trace.Endpoint,
+#           Insecure:    conf.Trace.Insecure,
+#           SampleRatio: conf.Trace.SampleRatio,
+#           Propagators: conf.Trace.Propagators,
+#       }); err != nil {
+#           // Init 内部 panic 已转 error，配置非法（缺 service_name / endpoint、
+#           // sample_ratio > 1、非法 exporter / propagator）均在此返回
+#           fmt.Println("trace init failed:", err)
+#           return
+#       }
+#
+#       // 批量导出有缓冲：进程退出前收尾，长任务可阶段性 Flush
+#       defer func() {
+#           sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+#           defer cancel()
+#           _ = trace.Shutdown(sctx)
+#       }()
+#
+#       run()
+#   }

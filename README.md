@@ -28,8 +28,9 @@ Go 微服务基础设施工具集，提供数据库访问、缓存、消息队�
 | `consul` | Consul SDK 封装：服务注册 / 发现、健康检查、KV 配置 | [README](consul/README.md) |
 | `nacos` | Nacos SDK 封装：配置管理、服务发现（闭包模式独立客户端） | [README](nacos/README.md) |
 | `registry` | 注册中心/配置中心统一抽象：consul / nacos 双适配器，服务注册发现、实例 Watch、配置热更新 | [README](registry/README.md) · [QUICKSTART](registry/QUICKSTART.md) |
-| `grpcx` | gRPC 服务工具：Server / Client 快速构建、cmux 端口复用（gRPC + HTTP）、优雅停机 | — |
-| `httpclient` | HTTP 客户端：连接池、JSON / 表单 / 文件上传、请求追踪 | — |
+| `trace` | 链路追踪与指标计量：OpenTelemetry 统一装配、W3C traceparent 跨进程传播（gRPC metadata / HTTP Header / MQ 消息头）、内置拦截器与中间件 | [README](trace/README.md) · [QUICKSTART](trace/QUICKSTART.md) |
+| `grpcx` | gRPC 服务工具：Server / Client 快速构建、cmux 端口复用（gRPC + HTTP）、优雅停机 | [README](grpcx/README.md) · [QUICKSTART](grpcx/QUICKSTART.md) |
+| `httpclient` | HTTP 客户端：连接池、JSON / 表单 / 文件上传、请求追踪 | [README](httpclient/README.md) · [QUICKSTART](httpclient/QUICKSTART.md) |
 | `common` | 通用工具函数：JWT、字符串 / 切片 / 时间 / 网络、RSA 加解密、密码哈希、统一响应体 | — |
 
 ## 快速引入
@@ -77,14 +78,15 @@ tools/
 ├── ratelimit/            # 限流与降级（含 redisstore / grpcmiddleware / httpmiddleware 子包）
 ├── redis/                # Redis 客户端
 ├── registry/             # 注册中心/配置中心统一抽象（consul/nacos 双适配器）
-└── retry/                # 重试执行器
+├── retry/                # 重试执行器
+└── trace/                # 链路追踪与指标计量（OpenTelemetry 封装）
 ```
 
 ## 设计约定
 
 - **独立模块**：每个组件拥有独立 `go.mod`，可单独版本管理与引入，不强制拉取整个仓库；`mq` 族拆为四个同级模块（共用同一门面契约），按需引入以免把无关后端的 SDK 拉进依赖树。
 - **panic 转 error**：对外 API 不向调用方抛出 panic；内部 recover 后包装为 error 返回。
-- **配置模板**：需要外部配置的组件提供 `config.example.yaml`（如 `gorm/database`、`consul`、`nacos`），字段与结构体 yaml tag 一一对应；`ratelimit` 根包为零依赖，其模板描述的是装配层同构 struct 的键位。
+- **配置模板**：需要外部配置的组件提供 `config.example.yaml`（如 `gorm/database`、`consul`、`nacos`），字段与结构体 yaml tag 一一对应（`httpclient` 即属此类，可直接反序列化，时长需写 `10s` 这类时长串）；`ratelimit`、`trace` 根包不内置 YAML 解析（保持零仓外依赖或只依赖 otel），`grpcx` 则只有 `ServiceConfig` 带 tag，其模板描述的是装配层同构 struct 的键位。
 - **文档配套**：核心组件配备 README（完整 API 参考）+ QUICKSTART（5 分钟上手）。
 - **测试覆盖**：关键路径均有单元测试，`go test ./...` 即可验证。
 

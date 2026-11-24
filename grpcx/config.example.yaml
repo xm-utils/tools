@@ -1,0 +1,153 @@
+# grpcx 组件配置模板
+# =============================================================================
+# 说明
+#   grpcx 没有自身的 Config 结构体与 Init 函数：服务端参数（name / addr）是
+#   NewGrpcServer / NewHTTPServer 的构造入参，客户端参数才有结构体
+#   （grpcx.ServiceConfig，带 yaml tag：name / address / timeout）。
+#   因此本模板描述的是【装配层同构 struct 的键位约定】：app 侧解析配置源后，
+#   再把字段传给 grpcx 的构造器与 ClientManager。注释标注了目标 Go 符号。
+#
+#   grpcx 自身不解析 YAML，也不引入任何配置库（viper / yaml 均由装配层负责）。
+# =============================================================================
+
+grpcx:
+  # ---------------- 服务端 ----------------
+  server:
+    # → NewGrpcServer(name, addr, register, opts...) 的前两个入参
+    # name 同时作为停机钩子的 EventName（日志与排查用的钩子标识）
+    name: order-svc
+    # 监听地址。注意：":9000" 会原样交给 net.Listen，grpcx 不会自动补内网 IP
+    #（源码中的 adjustAddr / intranetIP 当前无调用点）
+    addr: ":9000"
+
+    # 需要 gRPC + HTTP 同端口复用时，额外配置 HTTP 侧
+    # → NewHTTPServer(name, addr, httpSetup)；两者装进 NewServer 的切片
+    http:
+      enabled: false
+      name: gateway
+      addr: ":9000"
+      # ⚠ NewServer 的 IServer 切片必须 gRPC 在前、HTTP 在后：
+      #   HTTPServer 的匹配规则是 cmux.Any()，排在前面会吞掉 HTTP2 流量
+
+  # ---------------- 客户端 ----------------
+  # → []grpcx.ServiceConfig，交给 grpcx.GetClientManager().InitializeClients(...)
+  # 每一项的 name 必须与装配层 grpcx.RegisterCreator(name, creator) 的 name 一致，
+  # 否则 manager 会用空 creator 兜底（返回 nil 客户端）并只打日志、不返回 error。
+  clients:
+    - name: user                       # → ServiceConfig.Name（同时也是 creator 注册名）
+      address: 127.0.0.1:9001          # → ServiceConfig.Address（实际拨号目标）
+      timeout: 3s                      # → ServiceConfig.Timeout（时长串，详见下方陷阱说明）
+
+    - name: pay
+      address: 127.0.0.1:9002
+      timeout: 5s
+
+  # ---------------- 停机钩子（可选） ----------------
+  # → grpcx.NewCustomHook(eventName, priority, func())
+  # 执行顺序按 priority 数值降序；内置常量：WorkerPoolPriority=0、
+  # RoutinePoolPriority=1、LogPriority=2、CronPriority=3、GrpcServerPriority=4、
+  # HttpServerShutdownPriority=5（数值越大越先关闭）
+  shutdown:
+    custom_hooks:
+      - name: worker-pool
+        priority: 0        # 最后执行
+      - name: flush-metrics
+        priority: 10       # 比 gRPC / HTTP 服务更早执行
+
+  # ---------------- 链路追踪（可选） ----------------
+  # grpcx 只接收一个 tracerName 字符串：
+  #   服务端 → grpcx.TraceServerOptions(tracerName)...
+  #   客户端 → grpcx.WithClientTrace(tracerName) 或 grpcx.TraceClientDialOptions(tracerName)...
+  # 导出器、采样率等属于 trace 组件的配置面，见 ../trace/config.example.yaml
+  tracing:
+    enabled: true
+    tracer_name: order-svc
+
+  # =============================================================================
+  # ⚠ timeout 的反序列化陷阱（实测结论，务必读）
+  #   ServiceConfig.Timeout 的类型是 time.Duration，而 grpcx 不解析 YAML，
+  #   反序列化行为完全取决于装配层用的库：
+  #     - gopkg.in/yaml.v3：对 time.Duration 有专门处理，"3s"、"1.5s" 这类时长串
+  #       可直接反序列化成功；写成整数（3、10000000000，甚至 0）一律报错
+  #       `cannot unmarshal !!int `3` into time.Duration`（并不会“按纳秒接受”）
+  #     - spf13/viper + mapstructure：默认对 "3s" 报错，需加
+  #       mapstructure.StringToTimeDurationHookFunc（gorm/database 组件用的即此路径）；
+  #       该路径下整数会被当作纳秒，写成 3 就是 3 纳秒（几乎立即超时）
+  #   推荐做法：装配层用「Timeout 字符串」的同构 struct，再显式 time.ParseDuration 转换
+  #   （见下方示例）——两种配置源都能统一处理，且失败时能报出具体的服务名。
+  #   注意：yaml.v3 路径下无法把 timeout 显式写为 0（`0` 报错、`0s` 才合法）。
+  # =============================================================================
+
+# =============================================================================
+# 装配层加载示例
+# =============================================================================
+# 依赖：gopkg.in/yaml.v3（仅装配层需要，grpcx 本身零配置库依赖）
+#
+#   package main
+#
+#   import (
+#       "fmt"
+#       "log"
+#       "time"
+#
+#       "github.com/xm-utils/tools/grpcx"
+#       "gopkg.in/yaml.v3"
+#       "google.golang.org/grpc"
+#   )
+#
+#   // 与 config.example.yaml 键位同构；timeout 故意用 string 避开单位陷阱
+#   type serviceItem struct {
+#       Name    string `yaml:"name"`
+#       Address string `yaml:"address"`
+#       Timeout string `yaml:"timeout"`
+#   }
+#
+#   type grpcxCfg struct {
+#       Server struct {
+#           Name string `yaml:"name"`
+#           Addr string `yaml:"addr"`
+#       } `yaml:"server"`
+#       Clients []serviceItem `yaml:"clients"`
+#   }
+#
+#   func boot(conf grpcxCfg, raw []byte) error {
+#       if err := yaml.Unmarshal(raw, &conf); err != nil {
+#           return err
+#       }
+#
+#       // 1. 注册 creator：名字必须与 clients[].name 一致
+#       grpcx.RegisterCreator("user", func(_ string, conn *grpc.ClientConn) interface{} {
+#           return pb.NewUserClient(conn)
+#       })
+#
+#       // 2. 逐项转换 ServiceConfig（string → time.Duration）
+#       configs := make([]grpcx.ServiceConfig, 0, len(conf.Clients))
+#       for _, c := range conf.Clients {
+#           d, err := time.ParseDuration(c.Timeout)
+#           if err != nil {
+#               return fmt.Errorf("解析 grpcx.clients[%s].timeout 失败: %w", c.Name, err)
+#           }
+#           configs = append(configs, grpcx.ServiceConfig{
+#               Name:    c.Name,
+#               Address: c.Address,
+#               Timeout: d,
+#           })
+#       }
+#       if err := grpcx.GetClientManager().InitializeClients(configs); err != nil {
+#           return err
+#       }
+#
+#       // 3. 服务端：按需追加 trace 拦截器
+#       var opts []grpc.ServerOption
+#       opts = append(opts, grpcx.TraceServerOptions("order-svc")...)
+#       srv := grpcx.NewGrpcServer(conf.Server.Name, conf.Server.Addr, register, opts...)
+#
+#       // 4. 停机钩子：内置服务 + 自定义钩子一并挂上
+#       sh := grpcx.GetShutdown()
+#       sh.InstallShutdownHook(srv)
+#       sh.InstallShutdownHook(grpcx.NewCustomHook("worker-pool", grpcx.WorkerPoolPriority, stopWorkerPool))
+#
+#       go func() { log.Fatal(srv.Start()) }()
+#       sh.WaitShutdown() // 命中信号后按优先级降序执行钩子并 os.Exit(0)
+#       return nil
+#   }

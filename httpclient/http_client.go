@@ -24,7 +24,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		Timeout:              30 * time.Second,
 		MaxRetries:           3,
-		EnableCircuitBreaker: false, // 默认启用熔断器
+		EnableCircuitBreaker: false, // 默认不启用熔断器
 		ErrorThreshold:       0.5,
 		SlowCallDuration:     5 * time.Second,
 		WindowSize:           60 * time.Second,

@@ -1,0 +1,164 @@
+# httpclient 组件配置模板
+# =============================================================================
+# 说明
+#   httpclient 是仓内少数 **Config 自带 yaml tag** 的组件：本模板的键位与
+#   `httpclient.Config` 结构体字段一一对应，可直接反序列化后交给 Init。
+#
+#   但 httpclient 自身不解析 YAML、不引入任何配置库（viper / yaml 均由装配层负责），
+#   且单例由 sync.Once 固定：装配只能在进程启动阶段做一次，配置源热更新无法生效。
+#
+#   ⚠ 时长字段的陷阱（实测结论）：time.Duration 底层是 int64，但 gopkg.in/yaml.v3
+#   对它做了专门处理，行为与直觉相反：
+#     - 写时长串 "10s" / "1.5s" / "1m" → **能**直接反序列化成功
+#     - 写纳秒整数 10000000000，甚至 0  → **报错**
+#       `cannot unmarshal !!int `100000...` into time.Duration`
+#     因此本模板时长统一写串；想显式写 0 只能写 `0s`。
+#   若装配层走 spf13/viper + mapstructure，默认对 "10s" 会报错，需加
+#   mapstructure.StringToTimeDurationHookFunc，或改用文末「方案 B」的影子 struct。
+# =============================================================================
+
+httpclient:
+  # ---------------- 基础 ----------------
+  # → Config.Timeout（http.Client.Timeout）
+  # 单次尝试的真实上限，也是整条重试链里每一次调用的上限。默认 30s
+  # 注意：retry 内部给每次尝试包的 10s taskCtx 不生效（retryTask 忽略传入 ctx）
+  timeout: 10s
+
+  # → Config.MaxRetries（转发给 retry.Config.MaxRetries）
+  # 总尝试次数 = max_retries + 1；写 0 表示完全不重试（非幂等接口建议 0）
+  # 重试耗尽后的错误形如「重试4次后仍然失败: ...」，数字即 max_retries + 1
+  max_retries: 3
+
+  # ---------------- 熔断 ----------------
+  # → Config.EnableCircuitBreaker
+  # false 时内部仍会创建一个极端阈值的熔断器实例，但它不参与判定；
+  # 运维三接口在未启用时分别退化为：恒返回 Closed / 返回 nil / 只打一条 Warn
+  enable_circuit_breaker: false
+
+  # → Config.ErrorThreshold（仅 > 0 时才覆盖 breaker 默认值 0.5）
+  # 窗口内错误率达到该值即触发熔断
+  error_threshold: 0.5
+
+  # → Config.SlowCallDuration（仅 > 0 时才覆盖 breaker 默认值 5s）
+  # 单次耗时超过它记为一次慢调用
+  slow_call_duration: 5s
+
+  # → Config.WindowSize（仅 > 0 时才覆盖）
+  # 滑动窗口大小；一次 DoRequest（含全部重试）只算一个样本
+  window_size: 60s
+
+  # → Config.MinRequests（仅 > 0 时才覆盖）
+  # 窗口内累计到该请求数才开始评估阈值；调用量小的服务需要调低
+  min_requests: 10
+
+  # 以下三个 breaker 侧参数写在 newHttpClient 内部，**无法通过配置调整**：
+  #   slow_call_threshold   = 0.8      # 慢调用比例阈值
+  #   wait_duration_in_open = 30s      # Open 状态持续时长后转 Half-Open
+  #   half_open_max_reqs    = 5        # Half-Open 探测请求数上限
+  # 熔断器名固定为 "http-client"，状态变更回调只输出 logrus Warn。
+
+  # ---------------- 链路追踪 ----------------
+  # → Config.EnableTracing
+  # true 时把 http.Client.Transport 换成 trace.NewTracedTransport(tracer_name, http.DefaultTransport)
+  # 前置条件：app 需先调用 trace.Init 装配全局 Provider；未 Init 时该 transport 为透传零行为，
+  # 因此该开关可以无条件打开。另外出站 span 挂在 HttpRequest.Ctx 上，调用方忘传 Ctx 会形成孤立根 span
+  enable_tracing: false
+
+  # → Config.TracerName（留空回退 "httpclient"）
+  # 出站 CLIENT span 所属 tracer 名，建议传业务服务名
+  tracer_name: order-svc
+
+# =============================================================================
+# 本组件无法通过 YAML 表达的能力（需在装配层自行处理）
+#   1. LogKeeper 实现注入：Init 的第二个入参是接口值，只能代码传入；传 nil 即不回写请求日志
+#   2. 多实例 / 按域名差异化策略：单例设计，无法配置出第二个客户端
+#   3. 自定义 Transport（DialContext / TLS / 代理 / 连接池参数）：Config 无该字段
+#   4. 重试退避策略与可重试错误判定：固定 ExponentialBackoffStrategy{1s, 10s, 2.0}
+#   5. 热更新：sync.Once 决定配置变更必须重启进程
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 方案 A：时长直接写 "10s"，整段反序列化到 httpclient.Config（依赖 yaml.v3）
+# -----------------------------------------------------------------------------
+#   注意两种“缺失”的区别：
+#     - 整段 httpclient: 缺失 → cfg.HTTPClient 为 nil → Init 内部退化为 DefaultConfig()
+#     - 段存在但某个键缺失 → 该字段保持 Go 零值，Timeout 会变成 0（即不超时）
+#       需要默认值时不要删字段，或改用方案 B
+#   -----------------------------------------------------------------------------
+#   package main
+#
+#   import (
+#       "log"
+#       "os"
+#
+#       "github.com/xm-utils/tools/httpclient"
+#       "gopkg.in/yaml.v3"
+#   )
+#
+#   type appConfig struct {
+#       HTTPClient *httpclient.Config `yaml:"httpclient"`
+#   }
+#
+#   func main() {
+#       bs, err := os.ReadFile("config.yaml")
+#       if err != nil {
+#           log.Fatal(err)
+#       }
+#       var cfg appConfig
+#       if err := yaml.Unmarshal(bs, &cfg); err != nil {
+#           log.Fatal(err)
+#       }
+#       // cnf 为 nil 时 Init 内部会退化为 DefaultConfig()，因此整段缺失不会 panic
+#       // 但整段存在而单字段缺失时，该字段是 Go 零值（见上方说明）
+#       httpclient.Init(cfg.HTTPClient, nil)
+#   }
+#
+# -----------------------------------------------------------------------------
+# 方案 B：装配层影子 struct + 显式 ParseDuration（适用 viper / 需要更友好报错时）
+# -----------------------------------------------------------------------------
+#   type httpclientSection struct {
+#       Timeout              string `yaml:"timeout"`                 // "10s"
+#       MaxRetries           int    `yaml:"max_retries"`
+#       EnableCircuitBreaker bool   `yaml:"enable_circuit_breaker"`
+#       ErrorThreshold       float64 `yaml:"error_threshold"`
+#       SlowCallDuration     string `yaml:"slow_call_duration"`      // "5s"
+#       WindowSize           string `yaml:"window_size"`             // "60s"
+#       MinRequests          int    `yaml:"min_requests"`
+#       EnableTracing        bool   `yaml:"enable_tracing"`
+#       TracerName           string `yaml:"tracer_name"`
+#   }
+#
+#   func (s httpclientSection) toConfig() (*httpclient.Config, error) {
+#       // 从 DefaultConfig() 起步，只覆盖 YAML 里出现的字段；
+#       // 若直接 &Config{} 起步，缺失的 Timeout 会是 0（不超时）
+#       cnf := httpclient.DefaultConfig()
+#       cnf.MaxRetries = s.MaxRetries
+#       cnf.EnableCircuitBreaker = s.EnableCircuitBreaker
+#       cnf.MinRequests = s.MinRequests
+#       cnf.EnableTracing = s.EnableTracing
+#       if s.ErrorThreshold > 0 {
+#           cnf.ErrorThreshold = s.ErrorThreshold
+#       }
+#       if s.TracerName != "" {
+#           cnf.TracerName = s.TracerName
+#       }
+#       // 空串视为不设置，沿用 DefaultConfig 的默认值
+#       for _, item := range []struct {
+#           raw   string
+#           field *time.Duration
+#       }{
+#           {s.Timeout, &cnf.Timeout},
+#           {s.SlowCallDuration, &cnf.SlowCallDuration},
+#           {s.WindowSize, &cnf.WindowSize},
+#       } {
+#           if item.raw == "" {
+#               continue
+#           }
+#           d, err := time.ParseDuration(item.raw)
+#           if err != nil {
+#               return nil, fmt.Errorf("httpclient 时长配置 %q 非法: %w", item.raw, err)
+#           }
+#           *item.field = d
+#       }
+#       return cnf, nil
+#   }

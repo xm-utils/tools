@@ -1,0 +1,8 @@
+# metrics 组件配置模板（字段与 metrics.Config 的 yaml tag 一一对应）
+metrics:
+  # 指标名前缀，形成 <namespace>_<component>_<name>；留空取默认 xmt
+  namespace: xmt
+  # 是否注册 Go 运行时指标（gc、goroutine、内存等）；留空默认 true
+  enable_go_collector: true
+  # 是否注册进程指标（RSS、启动时间等），容器内按需开启
+  enable_process_collector: false

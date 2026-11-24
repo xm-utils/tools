@@ -95,11 +95,37 @@ func (p *Producer) Produce(ctx context.Context, topic string, msg *mq.Message) e
 }
 
 // ProduceBatch 批量发送消息，所有消息归属同一 Stream。
+// 与 list/zset/pubsub 后端口径一致：整批共用一个 PRODUCER span，逐条注入同一 traceparent。
 func (p *Producer) ProduceBatch(ctx context.Context, topic string, msgs []*mq.Message) error {
+	if len(msgs) == 0 {
+		return nil
+	}
+	if topic == "" {
+		return fmt.Errorf("mq/redis/stream: topic(stream key) 不能为空")
+	}
+	batchCtx, end := trace.StartProducerSpan(ctx, traceName, "stream produce "+topic, nil)
+	defer end()
+	sq, err := rs.NewStreamQueue(rs.DefaultQueueConfig(topic, "mq-producer"), p.client)
+	if err != nil {
+		return fmt.Errorf("mq/redis/stream: 创建队列句柄失败: %w", err)
+	}
 	for _, m := range msgs {
-		if err := p.Produce(ctx, topic, m); err != nil {
+		if m == nil {
+			return fmt.Errorf("mq/redis/stream: 批量消息中包含 nil 元素")
+		}
+		if m.Headers == nil {
+			m.Headers = map[string]string{}
+		}
+		trace.InjectMap(batchCtx, m.Headers)
+		payload, err := toEnvelope(m).Encode()
+		if err != nil {
 			return err
 		}
+		id, err := sq.EnqueueMessage(ctx, &rs.StreamMessage{RequestID: m.Key, Payload: payload})
+		if err != nil {
+			return fmt.Errorf("mq/redis/stream: 消息入队失败: %w", err)
+		}
+		m.ID = id
 	}
 	return nil
 }

@@ -194,8 +194,8 @@ func (c *Consumer) dispatch(ctx context.Context, sub *subscription, m *redis.Mes
 
 	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx。
 	hctx, end := trace.StartConsumerSpan(ctx, traceName, "pubsub receive "+topic, msg.Headers)
+	defer end()
 	err := mq.InvokeHandler(hctx, handler, msg)
-	end()
 	switch {
 	case err == nil:
 		// 投递完成，无确认动作

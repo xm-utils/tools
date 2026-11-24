@@ -242,8 +242,8 @@ func (c *Consumer) dispatch(ctx context.Context, sub *subscription, raw string, 
 
 	// 从消息头还原上游链路并开 CONSUMER span，handler 拿到贯通后的 ctx。
 	hctx, end := trace.StartConsumerSpan(ctx, traceName, "list receive "+topic, msg.Headers)
+	defer end()
 	err := mq.InvokeHandler(hctx, handler, msg)
-	end()
 	switch {
 	case err == nil:
 		if ackErr := c.ack(ctx, sub, raw); ackErr != nil {

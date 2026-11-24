@@ -1,0 +1,164 @@
+# ratelimit 配置模板
+#
+# 说明（重要）：本组件根包**零仓外依赖**，不内置 YAML 解析、也不内置配置源监听。
+# 因此下面的键位是「装配层配置约定」：装配层定义同构 struct 反序列化本文件，再映射进
+# 各组件配置结构体（ratelimit.TokenBucketConfig / SlidingWindowConfig / LeakyBucketConfig /
+# LocalConfig、redisstore.Config、grpcmiddleware.Config、httpmiddleware.Config）。
+# 键名与各结构体字段一一对应（snake_case），映射关系见每行注释；文件末尾给出加载示例。
+#
+# 热更新：规则变更由使用方经 registry/config.Watch 监听后调用 local.Update(key, rate, burst)
+# 或 tb.SetParams(rate, burst) 应用；组件侧只暴露这两个应用端点（与 logging 动态调级同一手法）。
+
+ratelimit:
+  # ==================== 后端选择 ====================
+  # local = 进程内份额（多实例各算各的）；redis = 全实例共享同一份（经 redisstore Lua 脚本）
+  backend: local
+  # 限流后端自身故障时是否放行（true 放行 / false 拒绝）。
+  # 映射为 grpcmiddleware.Config.FailOpen 与 httpmiddleware.Config.FailOpen，默认 false
+  fail_open: false
+
+  # ==================== 默认算法与参数（服务级单限流器时使用） ====================
+  # 三选一：token_bucket | sliding_window | leaky_bucket
+  # 注意：backend=redis 时只支持 token_bucket（redisstore 目前仅实现令牌桶）
+  algorithm: token_bucket
+
+  # → ratelimit.TokenBucketConfig{Rate, Burst}
+  token_bucket:
+    rate: 100.0          # 回填速率，个/秒，必须 > 0
+    burst: 200.0         # 桶容量（最大突发），必须 > 0；经验值 = rate × 可容忍突发秒数
+
+  # → ratelimit.SlidingWindowConfig{Limit, Window}
+  sliding_window:
+    limit: 100           # 窗口内最大放行数，必须 > 0；内存上界 O(limit)
+    window: 1s           # 窗口宽度，必须 > 0；duration 字符串（Go duration 格式）
+
+  # → ratelimit.LeakyBucketConfig{Rate, Queue}
+  leaky_bucket:
+    rate: 100.0          # 出水速率，个/秒，必须 > 0
+    queue: 200           # 桶容量（允许排队的水位数），必须 >= 1；1 即纯匀速零突发
+
+  # ==================== 本地内存后端（backend=local） ====================
+  # → ratelimit.LocalConfig{Rate, Burst}：作为「未显式配置的 Key」的默认模板，
+  #   Local 按 Key 惰性创建的限流器即令牌桶
+  local:
+    rate: 100.0
+    burst: 200.0
+
+  # ==================== Redis 后端（backend=redis） ====================
+  # client 字段无法由 YAML 表达：由装配层用 go-redis v8 建立后注入 redisstore.Config.Client。
+  # （redis 组件的 client 未导出，故不经其全局 API；连接池参数按 redis.Config 形态自行管理）
+  redis:
+    addr: "127.0.0.1:6379"     # → redis.Options.Addr
+    password: ""               # → redis.Options.Password
+    db: 0                      # → redis.Options.DB
+    key: "api:order:create"    # → redisstore.Config.Key（实际落库 xm_ratelimit:{api:order:create}）
+    rate: 100.0                # → redisstore.Config.Rate
+    burst: 200.0               # → redisstore.Config.Burst
+    ttl: 10m                   # → redisstore.Config.TTL，空闲状态自动清理；留空取默认 10m
+
+  # ==================== 多维规则（接口级 / 租户级，配合 Local 后端） ====================
+  # 每条规则 → 装配层先 local.Update(key, rate, burst) 预热，或由中间件按 Key 惰性创建。
+  # algorithm 仅用于装配层决定该 Key 用哪种限流器：Local 只能惰性创建/更新令牌桶，
+  # 非令牌桶规则需装配层自持 *SlidingWindow / *LeakyBucket 实例并调其 SetParams。
+  rules:
+    - key: "api:order:create"
+      algorithm: token_bucket
+      rate: 100.0
+      burst: 200.0
+    - key: "tenant:10086"
+      algorithm: sliding_window
+      limit: 600
+      window: 1m
+    - key: "downstream:payment-api"   # 出口自我限速：保护自己调用的下游
+      algorithm: leaky_bucket
+      rate: 50.0
+      queue: 100
+    - key: ""                          # 空 Key 约定：直通不限流（公开端点豁免）
+      algorithm: token_bucket
+
+  # ==================== 入口中间件挂载 ====================
+  # → grpcmiddleware.Config / httpmiddleware.Config 的 KeyFunc 维度选择。
+  # KeyFunc 是函数，不能由 YAML 直接表达：装配层按 dimension 生成闭包即可（见下方示例）。
+  middleware:
+    grpc:
+      enabled: true
+      dimension: method        # method = 缺省按 fullMethod | service = 服务级共享一份 | header = 按租户头
+      header: "x-tenant-id"    # dimension=header 时读取的 metadata 键；取不到则回退 fullMethod
+      fail_open: false         # 覆盖上层 fail_open
+    http:
+      enabled: true
+      dimension: path          # path = 缺省按 r.URL.Path | service = 服务级共享一份 | header = 按租户头
+      header: "X-Tenant-Id"    # dimension=header 时读取的请求头；取不到则回退 path
+      fail_open: false
+
+# ==================== 加载示例（装配层） ====================
+# package main
+#
+# import (
+#     "os"
+#     "time"
+#
+#     "gopkg.in/yaml.v3"
+#     "github.com/xm-utils/tools/ratelimit"
+# )
+#
+# type bucketCfg struct {
+#     Rate  float64 `yaml:"rate"`
+#     Burst float64 `yaml:"burst"`
+# }
+#
+# type ruleCfg struct {
+#     Key       string        `yaml:"key"`
+#     Algorithm string        `yaml:"algorithm"`
+#     Rate      float64       `yaml:"rate"`
+#     Burst     float64       `yaml:"burst"`
+#     Limit     int64         `yaml:"limit"`
+#     Window    time.Duration `yaml:"window"`
+#     Queue     int64         `yaml:"queue"`
+# }
+#
+# 其余字段按上文键位补齐（sliding_window / leaky_bucket / local / redis / middleware …）
+#
+# func main() {
+#     raw, err := os.ReadFile("ratelimit.yaml")
+#     if err != nil {
+#         panic(err) // 启动期失败退出属于业务选择，组件本身不 panic
+#     }
+#     var cfg struct {
+#         Ratelimit struct {
+#             Backend      string     `yaml:"backend"`
+#             FailOpen     bool       `yaml:"fail_open"`
+#             TokenBucket  bucketCfg  `yaml:"token_bucket"`
+#             Rules        []ruleCfg  `yaml:"rules"`
+#         } `yaml:"ratelimit"`
+#     }
+#     if err := yaml.Unmarshal(raw, &cfg); err != nil {
+#         panic(err)
+#     }
+#
+#     // 1) 后端与默认模板
+#     local, err := ratelimit.NewLocal(ratelimit.LocalConfig{
+#         Rate:  cfg.Ratelimit.TokenBucket.Rate,
+#         Burst: cfg.Ratelimit.TokenBucket.Burst,
+#     })
+#     if err != nil {
+#         panic(err)
+#     }
+#
+#     // 2) 逐条规则预热（非法参数在此暴露为 error，而不是请求期）
+#     //    Local 惰性创建的是令牌桶，因此只能为令牌桶规则预建；
+#     //    sliding_window / leaky_bucket 规则需装配层自行构造并持有实例，
+#     //    再由 KeyFunc 路由到对应限流器（或经自定义 Limiter 包装）
+#     for _, r := range cfg.Ratelimit.Rules {
+#         if r.Key == "" || r.Algorithm != "token_bucket" {
+#             continue // 空 Key = 直通约定，不建限流器
+#         }
+#         if err := local.Update(r.Key, r.Rate, r.Burst); err != nil {
+#             panic(err)
+#         }
+#     }
+#
+#     // 3) backend=redis 时改用 redisstore.New(...)，得到的 Limiter 可直接替换中间件 Config.Limiter
+#     // 4) KeyFunc 按 middleware.*.dimension 生成：
+#     //    method/path → 传 nil 走组件缺省；header → 从 metadata / r.Header 取值，取不到返回 "" 即直通
+# }
